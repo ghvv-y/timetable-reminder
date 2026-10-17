@@ -1,0 +1,117 @@
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <!-- 发送短信：这是本应用唯一的提醒出口 -->
+    <uses-permission android:name="android.permission.SEND_SMS" />
+
+    <!-- 读取 SIM 卡信息
+         【必须有】SubscriptionManager.getActiveSubscriptionInfoList() 需要它，
+         否则返回空列表 —— 表现为「设置页的『发送用哪张卡』读不到卡、也没得选」。
+         双卡手机拿不到卡列表时，发送只能用不确定的默认卡，容易静默失败。 -->
+    <uses-permission android:name="android.permission.READ_PHONE_STATE" />
+    <uses-permission android:name="android.permission.READ_PHONE_NUMBERS" />
+    <uses-permission android:name="android.permission.READ_BASIC_PHONE_STATE" />
+
+    <!-- 精确闹钟：保证到点准时触发 -->
+    <uses-permission android:name="android.permission.SCHEDULE_EXACT_ALARM" />
+    <uses-permission android:name="android.permission.USE_EXACT_ALARM" />
+
+    <!-- 开机自启：重启后自动恢复闹钟 -->
+    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
+    <uses-permission android:name="android.permission.WAKE_LOCK" />
+
+    <!-- 读取图片做课表识别 -->
+    <uses-permission android:name="android.permission.READ_MEDIA_IMAGES" />
+    <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" />
+    <uses-permission android:name="android.permission.CAMERA" />
+
+    <!-- 悬浮球截屏识别课表（仅在该功能开启期间使用）
+         这些权限只在用户点「开启屏幕识别」时才申请，平时不占用、不打扰，
+         不影响「闹钟到点绝对静默」这条核心规则 -->
+    <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PROJECTION" />
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+
+    <application
+        android:label="课表提醒"
+        android:name="${applicationName}"
+        android:icon="@mipmap/ic_launcher"
+        android:usesCleartextTraffic="false">
+
+        <activity
+            android:name=".MainActivity"
+            android:exported="true"
+            android:launchMode="singleTop"
+            android:taskAffinity=""
+            android:theme="@style/LaunchTheme"
+            android:configChanges="orientation|keyboardHidden|keyboard|screenSize|locale|layoutDirection|fontScale|screenLayout|density|uiMode"
+            android:hardwareAccelerated="true"
+            android:windowSoftInputMode="adjustResize">
+
+            <meta-data
+                android:name="io.flutter.embedding.android.NormalTheme"
+                android:resource="@style/NormalTheme" />
+
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
+
+        <meta-data
+            android:name="flutterEmbedding"
+            android:value="2" />
+
+        <!-- 闹钟接收器：到点静默发送短信，不显示任何通知 -->
+        <receiver
+            android:name=".SmsAlarmReceiver"
+            android:exported="false" />
+
+        <!-- 短信发送结果接收器：记录「是否真的发出去了」。
+             sendTextMessage 是异步的，调用不抛异常≠发送成功；
+             没有它就无法回答「为什么没收到短信」。 -->
+        <receiver
+            android:name=".SmsStatusReceiver"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="com.example.timetable_app.SMS_SENT" />
+                <action android:name="com.example.timetable_app.SMS_DELIVERED" />
+            </intent-filter>
+        </receiver>
+
+        <!-- 开机后自动恢复全部闹钟 -->
+        <receiver
+            android:name=".BootReceiver"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.BOOT_COMPLETED" />
+                <action android:name="android.intent.action.QUICKBOOT_POWERON" />
+            </intent-filter>
+        </receiver>
+
+        <!-- 静默短信服务（预留扩展用，不创建通知渠道，不影响静默特性） -->
+        <service
+            android:name=".SilentSmsService"
+            android:exported="false" />
+
+        <!-- 悬浮球截屏服务：仅在用户开启屏幕识别期间运行，
+             带系统强制要求的常驻通知（MediaProjection 规定） -->
+        <service
+            android:name=".ScreenCaptureService"
+            android:exported="false"
+            android:foregroundServiceType="mediaProjection" />
+
+        <!-- 悬浮球点击事件接收器 -->
+        <receiver
+            android:name=".ScreenCaptureReceiver"
+            android:exported="false" />
+
+    </application>
+
+    <queries>
+        <intent>
+            <action android:name="android.intent.action.PROCESS_TEXT" />
+            <data android:mimeType="text/plain" />
+        </intent>
+    </queries>
+</manifest>

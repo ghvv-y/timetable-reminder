@@ -1,0 +1,59 @@
+# ===== Flutter / Dart =====
+.dart_tool/
+.packages
+.pub-cache/
+.flutter-plugins
+.flutter-plugins-dependencies
+build/
+
+# ===== 构建产物（体积很大，不入库）=====
+dist/
+*.apk
+*.aab
+*.ipa
+*.exe
+*.dll
+*.lib
+*.pdb
+
+# ===== Android =====
+android/.gradle/
+android/local.properties
+android/app/debug/
+android/app/profile/
+android/app/release/
+# 签名文件：绝对不能入库
+android/key.properties
+*.jks
+*.keystore
+*.p12
+
+# ===== Windows =====
+windows/flutter/ephemeral/
+
+# ===== IDE =====
+.idea/
+.vscode/
+*.iml
+*.swp
+
+# ===== 系统 =====
+.DS_Store
+Thumbs.db
+
+# ===== 本地私有文件 =====
+# 识别工具生成的导入文件（含个人真实课表）
+课表导入.json
+*.local.json
+
+# 本机专用脚本（含个人路径，不入库）
+scripts/_local/
+
+# ===== Python =====
+__pycache__/
+*.pyc
+*.pyo
+.venv/
+venv/
+
+docs/_local/

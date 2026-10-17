@@ -1,0 +1,41 @@
+name: timetable_app
+description: 极简课表提醒 App —— 识别课表截图（含边侧作息时间），到点静默发送短信，由华为手表完成提醒。
+publish_to: "none"
+version: 0.9.4+26
+
+environment:
+  sdk: ">=3.3.0 <4.0.0"
+  flutter: ">=3.19.0"
+
+dependencies:
+  flutter:
+    sdk: flutter
+
+  # 状态管理
+  provider: ^6.1.2
+  # 应用数据目录与路径拼接
+  path_provider: ^2.1.4
+  path: ^1.9.0
+  # 设置存储
+  shared_preferences: ^2.3.2
+  # 读取 APK 版本号（用于在设置页显示「构建标识」，方便确认装的是哪一版）
+  package_info_plus: ^8.1.1
+  # 精确定时（静默短信引擎，第 4 阶段使用）
+  timezone: ^0.9.4
+  # 系统能力（短信发送、精确闹钟、权限）
+  permission_handler: ^11.3.1
+  # 课表识别（第 2 阶段使用，仅移动端）
+  image_picker: ^1.1.2
+  google_mlkit_text_recognition: ^0.13.0
+  # 文件导出（分享备份文件）
+  share_plus: ^10.0.2
+  # 图标
+  cupertino_icons: ^1.0.8
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^4.0.0
+
+flutter:
+  uses-material-design: true
