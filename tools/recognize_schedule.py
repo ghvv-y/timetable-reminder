@@ -32,8 +32,28 @@ import sys
 import numpy as np
 from PIL import Image
 
+# ---------------- 可调配置 ----------------
+#
+# 这一块是**给别的学校适配用的**。如果你的课表格式和这里不同，
+# 优先改这里的常量，通常不用动下面的解析函数。
+
+# 「地点」关键词。
+# 判定规则是「文本里出现这些字 → 认为是地点而不是课名」。
+# 换成你学校的叫法即可，例如「座」「中心」「基地」「实训室」。
+PLACE_WORDS = (
+    "楼", "馆", "厅", "室", "操场", "报告", "园", "号",
+)
+
+# 地点常见前缀（校区名）。按你学校改，例如「北校区」「南苑」。
+PLACE_PREFIXES = (
+    "校本部", "本部", "北校", "南校", "东校", "西校", "学校",
+)
+
+# 星期表头。默认同时认「周一」和「星期一」。
+WEEKDAY_HEADER = r"^[周星]\s*期?\s*([一二三四五六日天])$"
+
 # ---------------- 正则 ----------------
-RE_WEEKDAY = re.compile(r"^[周星]\s*期?\s*([一二三四五六日天])$")
+RE_WEEKDAY = re.compile(WEEKDAY_HEADER)
 WEEKDAY_MAP = {"一": 1, "二": 2, "三": 3, "四": 4,
                "五": 5, "六": 6, "日": 7, "天": 7}
 
@@ -307,10 +327,10 @@ def looks_like_place(t):
     如果第 2 行没有课名，我原来的逻辑会把「校本部3号教学楼3-310」
     当成课名，于是同一门课被拆成两条记录。
     """
-    for pre in ("校本部", "本部", "北校", "南校", "东校", "西校", "学校"):
+    for pre in PLACE_PREFIXES:
         if t.startswith(pre):
             return True
-    if any(k in t for k in ("楼", "馆", "厅", "室", "操场", "报告", "园", "号")):
+    if any(k in t for k in PLACE_WORDS):
         return True
     if RE_ROOM.search(t):
         return True
@@ -630,14 +650,145 @@ def to_app_payload(courses, periods):
     }
 
 
+def run_debug(img):
+    """诊断模式：把「检测到了什么」全部打印出来。
+
+    为什么需要：
+        换一个学校的课表时，识别结果往往不对，但用户不知道卡在哪一步 ——
+        是没找到网格线？还是切出来的格子不对？还是字段解析错了？
+        这个模式按流水线顺序把中间结果全打印出来，不用读源码也能定位。
+
+    对应关系：
+        步骤 1 失败  -> 调 H_TOL / V_TOL，或图片太糊
+        步骤 2 失败  -> 图片不是「表格型」课表（可能是列表式，需要另写解析）
+        步骤 3 基本对 -> 改 PLACE_WORDS / 正则
+    """
+    from PIL import Image as _Image
+    im = _Image.open(img)
+    print("=" * 74)
+    print("诊断模式")
+    print("=" * 74)
+    print(f"图片：{img}")
+    print(f"尺寸：{im.width} x {im.height}")
+    print()
+
+    # ---- 步骤 1：网格线 ----
+    print("-" * 74)
+    print("步骤 1 / 检测网格线")
+    print("-" * 74)
+    ys, xs = find_grid_lines(img)
+    print(f"横线 {len(ys)} 条：{ys}")
+    if len(ys) >= 2:
+        gaps = [ys[i + 1] - ys[i] for i in range(len(ys) - 1)]
+        print(f"  行高：{gaps}")
+    print(f"竖线 {len(xs)} 条：{xs}")
+    if len(xs) >= 2:
+        gaps = [xs[i + 1] - xs[i] for i in range(len(xs) - 1)]
+        print(f"  列宽：{gaps}")
+        print("  提示：列宽突然变成一半，说明这张表的下午部分用了压缩列，")
+        print("        这是常见的导出怪癖，属正常现象。")
+    if len(ys) < 3 or len(xs) < 3:
+        print()
+        print("  !! 网格线太少，切不出表格。")
+        print("     处理办法：")
+        print("       - 确认图片是「表格型」课表（有横竖线），不是列表式")
+        print("       - 调低文件顶部的 H_TOL / V_TOL（例如 0.45 / 0.40）")
+        print("       - 换更清晰的图片（放大后重试）")
+        return
+    print()
+
+    # ---- 步骤 2：逐格 OCR ----
+    print("-" * 74)
+    print("步骤 2 / 逐格识别")
+    print("-" * 74)
+    cells = ocr_cells(img, ys, xs)
+    if not cells:
+        print("  没识别出任何文字。可能是图片太模糊，或网格线把文字切坏了。")
+        return
+    print()
+
+    # ---- 步骤 3：时间栏与行对应 ----
+    print("-" * 74)
+    print("步骤 3 / 时间栏（左侧第 0 列）")
+    print("-" * 74)
+    periods = parse_times(cells, len(xs) - 1)
+    if not periods:
+        print("  没解析出作息时间。看看下面时间栏的原始文字，对照改 RE_TIME_RANGE。")
+        for (r, c), texts in sorted(cells.items()):
+            if c == 0:
+                print(f"    行{r}: {texts}")
+        return
+    print(f"  解析出 {len(periods)} 节")
+    for p in periods:
+        s, e = p["start"], p["end"]
+        print(f"    第{p['period']:2d}节  {s // 60:02d}:{s % 60:02d}"
+              f"-{e // 60:02d}:{e % 60:02d}   (行 {p['_row']})")
+    print()
+
+    # ---- 步骤 4：每个格子的原始文字 ----
+    print("-" * 74)
+    print("步骤 4 / 有内容的格子（原始文字）")
+    print("-" * 74)
+    wd = {1: "周一", 2: "周二", 3: "周三", 4: "周四",
+          5: "周五", 6: "周六", 7: "周日"}
+    for (r, c), texts in sorted(cells.items()):
+        if c == 0:
+            continue
+        tag = wd.get(c, f"第{c}列")
+        print(f"  [行{r} {tag}] {texts}")
+        parts = split_paired_cell(texts)
+        if len(parts) > 1:
+            print(f"      （检测到本格装了两门课，已按奇偶位拆成 {len(parts)} 份）")
+            for i, (part, off) in enumerate(parts):
+                print(f"        第{i + 1}份 → 星期偏移 +{off}: {part}")
+    print()
+
+    # ---- 步骤 5：最终结果 ----
+    print("-" * 74)
+    print("步骤 5 / 解析结果")
+    print("-" * 74)
+    courses = build_courses(cells, periods)
+    print(f"  共 {len(courses)} 门")
+    for c in courses:
+        print(f"    {wd.get(c['weekday'], '?')} 第{c['startPeriod']}-{c['endPeriod']}节"
+              f" 第{c['startWeek']}-{c['endWeek']}周  {c['name']}")
+        print(f"        教师={c['teacher'] or '—'}  地点={c['room'] or '—'}")
+    print()
+    print("=" * 74)
+    print("怎么看这份诊断：")
+    print("  · 步骤 1 的列宽/行高是否合理？不合理 -> 调 H_TOL / V_TOL")
+    print("  · 步骤 3 的时间栏是否全对？不对 -> 改 RE_TIME_RANGE")
+    print("  · 步骤 4 的每格文字是否完整？缺字段 -> 改格内解析顺序")
+    print("  · 步骤 5 的课程名/地点是否错位？-> 改 PLACE_WORDS / 正则")
+    print("=" * 74)
+
+
 def main():
-    if len(sys.argv) < 2:
+    args = [a for a in sys.argv[1:]]
+
+    debug = False
+    if "--debug" in args:
+        debug = True
+        args.remove("--debug")
+    if "-h" in args or "--help" in args or not args:
         print(__doc__)
-        sys.exit(1)
-    img = sys.argv[1]
+        print()
+        print("用法：")
+        print("    python recognize_schedule.py 课表图片.png")
+        print("    python recognize_schedule.py 课表图片.png --debug")
+        print()
+        print("  --debug   打印中间结果（网格线、每格原始文字、解析步骤），")
+        print("            换别的学校课表时用它定位问题。")
+        sys.exit(0 if ("-h" in sys.argv[1:] or "--help" in sys.argv[1:]) else 1)
+
+    img = args[0]
     if not os.path.exists(img):
         print(f"找不到文件：{img}")
         sys.exit(1)
+
+    if debug:
+        run_debug(img)
+        return
 
     print(f"识别中：{img}\n")
     courses, periods = recognize(img)
