@@ -1,4 +1,4 @@
-﻿// 课程表页：周视图网格 + 今日提醒摘要
+// 课程表页：周视图网格 + 今日提醒摘要
 //
 // 说明：课程格子里只显示「课程名 + 地点」，点一下可编辑或删除；
 // 作息时间来自识别结果，用于计算每节课的上课与下课时刻。
@@ -283,52 +283,56 @@ class _SchedulePageState extends State<SchedulePage> {
                     : null,
                 icon: const Icon(Icons.chevron_right),
               ),
-          IconButton(
-            tooltip: _selectMode
-                ? (_selected.isEmpty ? '请先勾选课程' : '删除选中的 ${_selected.length} 门课程')
-                : '批量删除课程',
-            color: _selectMode && _selected.isNotEmpty
-                ? const Color(0xFFD9534F)
-                : null,
-            onPressed: () {
-              if (_selectMode) {
-                if (_selected.isEmpty) {
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    const SnackBar(content: Text('请先点选要删除的课程')),
-                  );
-                  return;
-                }
-                _deleteSelected(state);
-              } else if (state.courses.isEmpty) {
-                ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(content: Text('还没有课程可删除')),
-                );
-              } else {
-                setState(() => _selectMode = true);
-              }
-            },
-            icon: Icon(_selectMode ? Icons.delete_forever : Icons.delete_sweep_outlined),
+            ],
           ),
-          if (_selectMode)
-            IconButton(
-              tooltip: '退出批量删除',
-              onPressed: _exitSelectMode,
-              icon: const Icon(Icons.close),
-            ),
-          if (!_selectMode)
-            IconButton(
-              tooltip: '导入课表文件',
-              onPressed: () => _importSchedule(state),
-              icon: const Icon(Icons.file_download_outlined),
-            ),
-          if (!_selectMode)
-            IconButton(
-              tooltip: '清空全部课程',
-              onPressed: state.courses.isEmpty
-                  ? null
-                  : () => _clearAllCourses(state),
-              icon: const Icon(Icons.layers_clear_outlined),
-            ),
+
+          // ---- 第二行：操作按钮 ----
+          //
+          // 【踩过的坑】这些按钮曾经和周次信息挤在同一行 Row 里。
+          // 手机屏幕窄时，最右边的「导入」和「清空」会被裁到屏幕外——
+          // 看起来就像「导入按钮消失了」，其实还在，只是看不见也点不到。
+          // 拆成独立一行后，任何宽度都放得下。
+          Row(
+            mainAxisAlignment: MainAxisAlignment.end,
+            children: <Widget>[
+              if (_selectMode)
+                IconButton(
+                  tooltip: '退出批量删除',
+                  onPressed: _exitSelectMode,
+                  icon: const Icon(Icons.close),
+                )
+              else ...<Widget>[
+                TextButton.icon(
+                  onPressed: () => _importSchedule(state),
+                  icon: const Icon(Icons.file_download_outlined, size: 18),
+                  label: const Text('导入课表'),
+                  style: TextButton.styleFrom(
+                    padding: const EdgeInsets.symmetric(horizontal: 10),
+                    minimumSize: const Size(0, 36),
+                    visualDensity: VisualDensity.compact,
+                  ),
+                ),
+                IconButton(
+                  tooltip: '批量删除课程',
+                  onPressed: () {
+                    if (state.courses.isEmpty) {
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        const SnackBar(content: Text('还没有课程可删除')),
+                      );
+                    } else {
+                      setState(() => _selectMode = true);
+                    }
+                  },
+                  icon: const Icon(Icons.delete_sweep_outlined),
+                ),
+                IconButton(
+                  tooltip: '清空全部课程',
+                  onPressed: state.courses.isEmpty
+                      ? null
+                      : () => _clearAllCourses(state),
+                  icon: const Icon(Icons.layers_clear_outlined),
+                ),
+              ],
             ],
           ),
 
