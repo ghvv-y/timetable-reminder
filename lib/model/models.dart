@@ -208,13 +208,7 @@ class Alarm {
         timeMinute: int.tryParse('${m['timeMinute']}') ?? 0,
         message: (m['message'] ?? '').toString(),
         repeatType: (m['repeatType'] ?? 'once').toString(),
-        weekdays: (m['weekdays'] ?? '')
-            .toString()
-            .split(',')
-            .where((e) => e.trim().isNotEmpty)
-            .map((e) => int.tryParse(e.trim()) ?? 0)
-            .where((e) => e > 0)
-            .toList(),
+        weekdays: _parseWeekdays(m['weekdays']),
         enabled: '${m['enabled']}' == '1' || '${m['enabled']}' == 'true',
         label: (m['label'] ?? '自定义').toString(),
         courseId: (m['courseId'] == null || '${m['courseId']}' == '')
@@ -224,6 +218,29 @@ class Alarm {
             ? null
             : int.tryParse('${m['weekday']}'),
       );
+
+  /// 兼容三种写法：
+  ///   "1,3,5"        （本 App 存档格式）
+  ///   [1, 3, 5]      （手写 JSON 常见的数组写法）
+  ///   1              （单个数字，顺手容错）
+  /// 只在 1..7 范围内保留，越界值丢弃（原生侧 nextTrigger 也只在 1..7 里找）。
+  static List<int> _parseWeekdays(Object? value) {
+    if (value == null) return const <int>[];
+    final List<int> out = <int>[];
+    if (value is List) {
+      for (final Object? e in value) {
+        final int? n = int.tryParse('$e');
+        if (n != null && n >= 1 && n <= 7) out.add(n);
+      }
+      return out;
+    }
+    final String s = value.toString();
+    for (final String part in s.split(',')) {
+      final int? n = int.tryParse(part.trim());
+      if (n != null && n >= 1 && n <= 7) out.add(n);
+    }
+    return out;
+  }
 }
 
 /// 短信发送日志：静默记录，便于核对是否漏发

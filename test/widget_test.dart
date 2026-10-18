@@ -11,6 +11,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:timetable_app/model/models.dart';
 import 'package:timetable_app/model/period_time.dart';
 import 'package:timetable_app/ocr/table_parser.dart';
+import 'package:timetable_app/services/storage.dart';
 import 'package:timetable_app/utils/time_utils.dart';
 
 void main() {
@@ -827,6 +828,74 @@ void main() {
         repeatType: 'weekly',
       );
       expect(fromCourse.courseId != null, isTrue);
+    });
+  });
+
+  group('导入/加载清洗走真实路径（Storage.importJson）', () {
+    // 回归测试：清洗逻辑曾经只挂在「导入」上，启动加载不走 ——
+    // 老版本写下的坏存档会永远跟着用户。现在两条路共用同一套解析。
+    // 这里直接喂一份「坏得很典型」的 JSON，验证最终状态。
+
+    test('越界字段被夹、颠倒被纠正、空课名丢弃、id 去重', () {
+      Storage.instance.importJson(jsonEncode(<String, Object?>{
+        'courses': <Object?>[
+          <String, Object?>{'name': 'A', 'weekday': 14, 'startPeriod': 99, 'endPeriod': 1},
+          <String, Object?>{'name': 'B', 'weekday': 1, 'startPeriod': 3, 'endPeriod': 4},
+          <String, Object?>{'name': 'C', 'id': 'dup', 'weekday': 2, 'startPeriod': 5, 'endPeriod': 6},
+          <String, Object?>{'name': 'D', 'id': 'dup', 'weekday': 3, 'startPeriod': 7, 'endPeriod': 8},
+          <String, Object?>{'name': '   '},
+          <String, Object?>{'name': 'E', 'weekday': 2, 'weekType': '随便写', 'startWeek': 20, 'endWeek': 2},
+        ],
+        'periods': <Object?>[
+          <String, Object?>{'period': 1, 'startMinute': 1500, 'endMinute': 480},
+          <String, Object?>{'period': 1, 'startMinute': 480, 'endMinute': 525},
+          <String, Object?>{'period': 2, 'startMinute': 530, 'endMinute': 575},
+        ],
+        'alarms': <Object?>[
+          <String, Object?>{'id': 'a1', 'timeMinute': 600, 'message': 'x',
+                            'weekdays': <int>[1, 3, 5], 'enabled': true},
+        ],
+      }));
+
+      final List<Course> cs = Storage.instance.courses;
+      expect(cs.length, 5, reason: '空课名被丢弃，其余 5 门保留');
+
+      // A：weekday 14 -> 7；节次 99->20、1 -> 纠正为 1-20
+      final Course a = cs.firstWhere((Course c) => c.name == 'A');
+      expect(a.weekday, 7);
+      expect(a.startPeriod, 1);
+      expect(a.endPeriod, 20);
+
+      // B：没给 id，导入后应补上非空唯一 id
+      final Course b = cs.firstWhere((Course c) => c.name == 'B');
+      expect(b.id, isNotEmpty);
+
+      // C/D：重复 id 被重排，两者 id 不再相同
+      final Course c1 = cs.firstWhere((Course c) => c.name == 'C');
+      final Course d1 = cs.firstWhere((Course c) => c.name == 'D');
+      expect(c1.id, isNot(d1.id));
+
+      // 全部 id 唯一
+      final List<String> ids = cs.map((Course c) => c.id).toList();
+      expect(ids.toSet().length, ids.length, reason: 'id 必须唯一，否则闹钟撞车');
+
+      // E：weekType 非法 -> all；周次颠倒 -> 2-20
+      final Course e = cs.firstWhere((Course c) => c.name == 'E');
+      expect(e.weekType, 'all');
+      expect(e.startWeek, 2);
+      expect(e.endWeek, 20);
+
+      // 作息：重复节次只留第一个；1500 -> 夹到 1439 以内；倒挂 -> 补正为 s < e
+      final List<PeriodTime> ps = Storage.instance.periodTimes;
+      expect(ps.length, 2);
+      expect(ps.first.period, 1);
+      expect(ps.first.startMinute, inInclusiveRange(0, 1439));
+      expect(ps.first.endMinute, inInclusiveRange(0, 1439));
+      expect(ps.first.startMinute, lessThan(ps.first.endMinute));
+
+      // 闹钟：数组写法的 weekdays 能解析
+      final Alarm al = Storage.instance.alarms.first;
+      expect(al.weekdays, <int>[1, 3, 5]);
     });
   });
 }

@@ -57,8 +57,10 @@ class Storage {
       if (raw.trim().isEmpty) return;
       final Map<String, Object?> data =
           Map<String, Object?>.from(jsonDecode(raw) as Map);
-      courses = _list(data['courses']).map(Course.fromMap).toList();
-      periodTimes = _list(data['periods']).map(PeriodTime.fromMap).toList();
+      // 加载时也做清洗：存档可能是旧版本写的、也可能被手工改过。
+      // 只清洗导入入口的话，老用户升级后坏数据会一直跟着。
+      courses = _parseCourses(_list(data['courses']));
+      periodTimes = _parsePeriods(_list(data['periods']));
       alarms = _list(data['alarms']).map(Alarm.fromMap).toList();
       logs = _list(data['logs']).map(SmsLog.fromMap).toList();
     } catch (_) {
@@ -76,6 +78,64 @@ class Storage {
         .whereType<Map<Object?, Object?>>()
         .map((Map<Object?, Object?> e) => Map<String, Object?>.from(e))
         .toList();
+  }
+
+  /// 作息时间统一入口：夹范围 + 去重 + 排序。
+  ///
+  /// startMinute 越界（如手写成 1500）时，App 算出的上课前提醒时刻
+  /// 会超过 24 小时，原生侧 nextTrigger 直接拒绝注册 ——
+  /// 表现为「这门课一条提醒都没有」，同样是静默失效。
+  static List<PeriodTime> _parsePeriods(List<Map<String, Object?>> raw) {
+    final List<PeriodTime> out = <PeriodTime>[];
+    final Set<int> seen = <int>{};
+    for (final Map<String, Object?> m in raw) {
+      final PeriodTime pt = PeriodTime.fromMap(m);
+      if (pt.period < 1 || pt.period > 20) continue;
+      if (seen.contains(pt.period)) continue;   // 重复节次只保留第一个
+      seen.add(pt.period);
+
+      int clamp(int v, int lo, int hi) => v < lo ? lo : (v > hi ? hi : v);
+      int s = clamp(pt.startMinute, 0, 1439);
+      int e = clamp(pt.endMinute, 0, 1439);
+      if (e <= s) {
+        // 颠倒/相等时兜底 45 分钟。注意 s 可能已在 1439 上限，
+        // 直接 +45 会再次越界，所以先夹再回退。
+        e = clamp(s + 45, 0, 1439);
+        if (e <= s) s = clamp(e - 45, 0, 1439);
+      }
+
+      out.add(PeriodTime(period: pt.period, startMinute: s, endMinute: e));
+    }
+    out.sort((PeriodTime a, PeriodTime b) => a.period.compareTo(b.period));
+    return out;
+  }
+
+  /// 课程列表统一入口：清洗 + 保证 id 唯一。
+  ///
+  /// 【为什么加载和导入都必须走这里】
+  ///   - weekday: 14      -> 课表网格只有 1..7，这门课渲染不出来
+  ///   - startPeriod: 99  -> 查不到作息时间，闹钟连一条都不会生成
+  ///   - id 缺失/重复     -> 闹钟 id 变成 pre_ / post_ 全撞车，
+  ///                         所有课程只剩最后一条提醒
+  /// 这三种坏数据都不报错，只会让功能「静默失效」。
+  /// 存档可能来自旧版本或手工编辑，所以启动加载时也必须清洗，
+  /// 不能只在导入时洗一次。
+  static List<Course> _parseCourses(List<Map<String, Object?>> raw) {
+    final Set<String> usedIds = <String>{};
+    final List<Course> cleaned = <Course>[];
+    int seq = 0;
+    for (final Map<String, Object?> m in raw) {
+      final Course? c = _sanitizeCourse(Course.fromMap(m));
+      if (c == null) continue;
+
+      String id = c.id;
+      if (id.isEmpty || usedIds.contains(id)) {
+        id = 'c_${DateTime.now().microsecondsSinceEpoch}_${seq++}';
+      }
+      usedIds.add(id);
+      cleaned.add(id == c.id ? c : c.copyWith(id: id));
+    }
+    return cleaned;
   }
 
   /// 导出为 JSON 字符串（备份 / 手机电脑同步共用）
@@ -97,32 +157,9 @@ class Storage {
     final Map<String, Object?> data =
         Map<String, Object?>.from(jsonDecode(content) as Map);
 
-    // 【必须清洗】导入的文件可能是手写的（README 里就鼓励手写），
-    // 也可能是别的版本的识别工具生成的。以下坏数据都不会报错，
-    // 但会造成「课程静默消失 / 永远不提醒」：
-    //   weekday: 14      -> 课表网格只有 1..7，这门课渲染不出来
-    //   startPeriod: 99  -> 查不到作息时间，闹钟连一条都不会生成
-    //   id 缺失/重复     -> 闹钟 id 变成 pre_ / post_ 全撞车，
-    //                       所有课程只剩最后一条提醒
-    final List<Course> raw = _list(data['courses']).map(Course.fromMap).toList();
-
-    final Set<String> usedIds = <String>{};
-    final List<Course> cleaned = <Course>[];
-    int seq = 0;
-    for (final Course original in raw) {
-      final Course? c = _sanitizeCourse(original);
-      if (c == null) continue;
-
-      String id = c.id;
-      if (id.isEmpty || usedIds.contains(id)) {
-        id = 'c_${DateTime.now().microsecondsSinceEpoch}_${seq++}';
-      }
-      usedIds.add(id);
-      cleaned.add(id == c.id ? c : c.copyWith(id: id));
-    }
-
-    courses = cleaned;
-    periodTimes = _list(data['periods']).map(PeriodTime.fromMap).toList();
+    // 与启动加载共用同一套清洗（见 _parseCourses / _parsePeriods 的注释）。
+    courses = _parseCourses(_list(data['courses']));
+    periodTimes = _parsePeriods(_list(data['periods']));
     alarms = _list(data['alarms']).map(Alarm.fromMap).toList();
     logs = <SmsLog>[];
     save();
@@ -130,7 +167,7 @@ class Storage {
 
   /// 把课程数据夹到合法范围；没有课名的直接丢掉（返回 null）
   ///
-  /// 注意 id 不在这里生成 —— 唯一性要在 importJson 里统一定，
+  /// 注意 id 不在这里生成 —— 唯一性统一在 _parseCourses 里处理，
   /// 因为这里看不到其它课程。
   static Course? _sanitizeCourse(Course c) {
     final String name = c.name.trim();

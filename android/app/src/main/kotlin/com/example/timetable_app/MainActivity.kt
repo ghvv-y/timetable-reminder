@@ -740,43 +740,62 @@ object AlarmScheduler {
             Diag.log(context, "闹钟 $id 算不出触发时间，未注册")
             return
         }
+        scheduleAt(context, alarm, runAt)
+    }
+
+    /**
+     * 把闹钟注册到系统的唯一入口。
+     *
+     * 为什么注册和「触发后的重排」必须走同一个函数：
+     *   曾经 scheduleOne 用 setAlarmClock（闹钟时钟型，最抗冻结），
+     *   而接收器重排时直接用了 setExactAndAllowWhileIdle。
+     *   于是每周闹钟**第一次触发后就降级回普通型**，抗冻结能力全丢；
+     *   更糟的是 Android 12+ 没有精确闹钟权限时，
+     *   setExactAndAllowWhileIdle 抛 SecurityException 被 catch，
+     *   重排彻底失败 —— 每周闹钟只响一次就永久停止。
+     *   现在两处都走这里。
+     *
+     * 【优先用 setAlarmClock】这是系统里最强的一类闹钟：
+     *   - 不受 Doze 限制
+     *   - 优先级最高，系统会主动把应用拉起来
+     *   - 对「应用冻结」的容忍度远高于普通闹钟
+     *   - 不要求精确闹钟权限，不会抛 SecurityException
+     * 代价：状态栏会出现一个闹钟小图标（系统对「下一个闹钟」的提示）。
+     * 为了提醒能真的响，这个代价值得。
+     */
+    fun scheduleAt(context: Context, alarm: JSONObject, runAt: Long) {
+        val id = alarm.optString("id")
+        if (id.isEmpty() || runAt <= 0L) return
 
         val am = context.getSystemService(Context.ALARM_SERVICE) as AlarmManager
         val pi = pendingIntent(context, id)
         val shown = java.text.SimpleDateFormat(
             "MM-dd HH:mm", java.util.Locale.US
         ).format(java.util.Date(runAt))
-        try {
-            // 【优先用 setAlarmClock】这是系统里最强的一类闹钟。
-            //
-            // 实测问题：用 setExactAndAllowWhileIdle 注册后，一开始正常，
-            // 过一两天就再也不触发 —— 日志里连「闹钟触发」都没有，
-            // 说明闹钟被系统清掉/不再投递了。
-            // vivo 等机型会把「长期没用」的应用冻结，普通闹钟随之失效。
-            //
-            // setAlarmClock 是系统闹钟应用用的同一类机制：
-            //   - 不受 Doze（打盹）限制
-            //   - 优先级最高，系统会主动把应用拉起来
-            //   - 对「应用冻结」的容忍度远高于普通闹钟
-            // 代价：状态栏会出现一个闹钟小图标（系统对"下一个闹钟"的提示）。
-            // 为了提醒能真的响，这个代价值得。
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
-                val showIntent = PendingIntent.getActivity(
-                    context,
-                    id.hashCode() + 3,
-                    Intent(context, MainActivity::class.java).apply {
-                        addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                    },
-                    PendingIntent.FLAG_UPDATE_CURRENT or
-                            PendingIntent.FLAG_IMMUTABLE
-                )
+
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
+            val showIntent = PendingIntent.getActivity(
+                context,
+                id.hashCode() + 3,
+                Intent(context, MainActivity::class.java).apply {
+                    addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                },
+                PendingIntent.FLAG_UPDATE_CURRENT or
+                        PendingIntent.FLAG_IMMUTABLE
+            )
+            try {
                 am.setAlarmClock(
                     AlarmManager.AlarmClockInfo(runAt, showIntent), pi
                 )
                 Diag.log(context, "已注册闹钟 闹钟时钟型：$shown  $id")
                 return
+            } catch (e: Exception) {
+                // 个别 ROM 可能拒绝 setAlarmClock，退回下面的精确/非精确路径
+                Diag.log(context, "setAlarmClock 被拒（${e.message}），改用普通注册：$id")
             }
+        }
 
+        try {
             val mode = when {
                 Build.VERSION.SDK_INT >= Build.VERSION_CODES.S -> {
                     if (am.canScheduleExactAlarms()) {

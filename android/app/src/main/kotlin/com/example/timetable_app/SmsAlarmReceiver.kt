@@ -125,23 +125,15 @@ class SmsAlarmReceiver : BroadcastReceiver() {
             Diag.log(appContext, "重复闹钟算不出下一次触发时间")
             return
         }
-        val am = appContext.getSystemService(Context.ALARM_SERVICE)
-                as android.app.AlarmManager
-        val pi = AlarmScheduler.pendingIntent(appContext, alarmId)
-        try {
-            am.setExactAndAllowWhileIdle(
-                android.app.AlarmManager.RTC_WAKEUP, next, pi
-            )
-            Diag.log(
-                appContext,
-                "已安排下一次：${java.text.SimpleDateFormat(
-                    "MM-dd HH:mm", java.util.Locale.US
-                ).format(java.util.Date(next))}"
-            )
-        } catch (e: Exception) {
-            Diag.log(appContext, "安排下一次失败：${e.message}")
-            Log.w("TimetableApp", "安排下一次失败: ${e.message}")
-        }
+
+        // 重排必须走和初始注册相同的入口（闹钟时钟型 + 降级链）。
+        //
+        // 【踩过的坑】这里曾经直接用 setExactAndAllowWhileIdle：
+        //   1. 每周闹钟第一次触发后就从「闹钟时钟型」降级回普通型，
+        //      防冻结能力全丢；
+        //   2. Android 12+ 没精确闹钟权限时它会抛 SecurityException，
+        //      重排失败 —— 每周闹钟只响一次就永久停止。
+        AlarmScheduler.scheduleAt(appContext, alarm, next)
     }
 
     /**

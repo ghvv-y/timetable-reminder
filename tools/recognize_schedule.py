@@ -89,83 +89,6 @@ BLANK_INK_RATIO = 0.004
 
 
 # ---------------- 格线 ----------------
-def header_columns(img_path, ys):
-    """用星期表头的位置推导列边界。
-
-    做法**只识别表头那一条**（不是整图），又快又准：
-      1. 取第一条横线以上的区域作为表头带
-      2. 单独 OCR 这条带，拿到每个「星期X」的左边界
-      3. 相邻表头左边界的**中点**就是列分界
-
-    为什么不用像素竖线：
-        实测检测到的竖线在 x=859/1153/1448…，但真实列边界不在那里
-        （那是色块边缘）。按它切会把「健康教育」（x=861）和
-        「工程图学」（x=1008）都归到第 1 列，而后者其实属于第 2 列。
-    """
-    from rapidocr_onnxruntime import RapidOCR
-    from PIL import Image
-
-    im = Image.open(img_path).convert("RGB")
-    band = np.asarray(im)[max(0, ys[0] - 120):ys[0], :]
-    if band.size == 0:
-        return []
-
-    res, _ = RapidOCR()(band)
-    heads = []
-    for item in (res or []):
-        box, text = item[0], item[1].strip()
-        m = RE_WEEKDAY.match(text)
-        if not m:
-            continue
-        x = min(p[0] for p in box)
-        heads.append((WEEKDAY_MAP[m.group(1)], x))
-    if len(heads) < 5:
-        return []
-
-    heads.sort(key=lambda h: h[1])
-    seen, uniq = set(), []
-    for wd, x in heads:
-        if wd not in seen:
-            seen.add(wd)
-            uniq.append((wd, x))
-
-    xs = [x for _, x in uniq]
-    step = (xs[-1] - xs[0]) / (len(xs) - 1) if len(xs) > 1 else 295
-    bounds = [xs[0] - step / 2]
-    for i in range(len(xs) - 1):
-        bounds.append((xs[i] + xs[i + 1]) / 2)
-    bounds.append(xs[-1] + step / 2)
-    return bounds          # 长度 = 列数 + 1
-
-
-def band_columns(lineish, y0, y1, min_x, w, th=0.45):
-    """在**某一个行带内**检测竖线，得到该行的列边界。
-
-    为什么必须逐行带检测：
-        这张课表**同一张表里有两套列布局** ——
-          上午（1~6 节）：每列约 295px，与表头对齐
-          下午（7~12 节）：每列约 147px，压缩了一半
-        用一套全局列边界去切，必然有一半是错的。
-
-    这正是「健康教育 / 工程图学」被并到同一列的原因。
-    """
-    sub = lineish[y0:y1, :]
-    if sub.size == 0:
-        return []
-    ratios = sub.mean(axis=0)
-    xs, inrun, start = [], False, 0
-    for x in range(w):
-        if ratios[x] > th and x > min_x:
-            if not inrun:
-                start, inrun = x, True
-        elif inrun:
-            xs.append((start + x - 1) // 2)
-            inrun = False
-    if inrun:
-        xs.append((start + w - 1) // 2)
-    return xs
-
-
 def find_grid_lines(img_path):
     im = Image.open(img_path).convert("RGB")
     a = np.asarray(im).astype(np.int16)
@@ -190,6 +113,11 @@ def find_grid_lines(img_path):
         return out
 
     ys_all = runs(lineish.mean(axis=1), H_TOL)
+
+    # 没检测到任何横线时直接返回空，别让下面 ys[0] 抛 IndexError。
+    # 这常见于：图片不是表格型课表、清晰度太低、或是一张照片。
+    if not ys_all:
+        return [], []
 
     # 只保留「间距规整」的那一段（课表主体），排除底部清单表
     ys = ys_all
@@ -238,26 +166,6 @@ def cell_is_blank(arr):
     """
     gray = arr.mean(axis=2)
     return float((gray < 215).mean()) < BLANK_INK_RATIO
-
-
-def crop_to_ink(arr, pad=6):
-    """把格子裁剪到「有内容」的范围，去掉四周大片空白。
-
-    为什么需要：格子的实际宽度可能远大于里面的文字。
-    实测时间栏格子宽 793px，而「第(08:00-08:45)」只占左边约 200px。
-    若不裁剪，OCR 会在一大片空白里识别一小段小字，效果很差（甚至认不出）。
-    """
-    gray = arr.mean(axis=2)
-    ink = gray < 215
-    if not ink.any():
-        return arr
-    rows = np.where(ink.any(axis=1))[0]
-    cols = np.where(ink.any(axis=0))[0]
-    y0 = max(0, rows[0] - pad)
-    y1 = min(arr.shape[0], rows[-1] + pad + 1)
-    x0 = max(0, cols[0] - pad)
-    x1 = min(arr.shape[1], cols[-1] + pad + 1)
-    return arr[y0:y1, x0:x1]
 
 
 def ocr_cells(img_path, ys, xs):
