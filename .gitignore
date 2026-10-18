@@ -57,3 +57,9 @@ __pycache__/
 venv/
 
 docs/_local/
+
+# ===== 测试用私有课表图片 =====
+# OcrEngineTest 用的 timetable.ppm 是**真实个人课表**的转换文件，
+# 绝对不能进开源仓库（泄露隐私）。测试前用 PIL 把课表图片转成 PPM：
+#   python -c "from PIL import Image; Image.open('课表图片.png').convert('RGB').save('android/app/src/test/resources/timetable.ppm','PPM')"
+android/app/src/test/resources/timetable.ppm

@@ -59,4 +59,16 @@ dependencies {
     // 拉丁语系模型（Latn_ctc），中文课程名一个字都认不出来。
     // 这里选 bundled 版，模型随 APK 分发，完全离线可用。
     implementation("com.google.mlkit:text-recognition-chinese:16.0.1")
+
+    // PP-OCR 离线识别引擎（桌面端同款模型，替代整图 ML Kit）
+    //
+    // 为什么换：ML Kit 整图识别中文课表是乱码（相邻格子文字串行），
+    // 而桌面工具用「逐格 + PP-OCR」能做到 19 门课基本正确。
+    // onnxruntime-android 是微软官方引擎，模型放 assets/ocr/。
+    implementation("com.microsoft.onnxruntime:onnxruntime-android:1.20.0")
+
+    // 宿主 JVM 单元测试用桌面版引擎 —— 让识别管线可以在电脑上
+    // 直接跑真实课表图片做回归，不必依赖真机。
+    testImplementation("com.microsoft.onnxruntime:onnxruntime:1.20.0")
+    testImplementation("junit:junit:4.13.2")
 }
