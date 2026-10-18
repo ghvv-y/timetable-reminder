@@ -36,11 +36,22 @@ class AlarmHealth {
   /// 当前第几周，-1 表示算不出来（没设学期开始日）
   final int week;
 
+  /// 通知权限是否已开
+  ///
+  /// Android 13+ 没这个权限时 notify() 是**静默失败**（不抛异常也不显示），
+  /// 必须在界面上明确告诉用户，否则他会以为「闹钟没响」。
+  final bool notifEnabled;
+
+  /// 当前提醒方式（both / notify / sms）
+  final String mode;
+
   const AlarmHealth({
     required this.configured,
     required this.alive,
     required this.nextTrigger,
     required this.week,
+    this.notifEnabled = true,
+    this.mode = 'both',
   });
 
   /// 系统里的闹钟是不是被清掉了
@@ -50,6 +61,9 @@ class AlarmHealth {
 
   /// 周次是否已配置（没配的话起止周过滤不生效）
   bool get weekKnown => week > 0;
+
+  /// 提醒方式是否包含通知
+  bool get wantsNotify => mode != 'sms';
 }
 
 class AlarmScheduler {
@@ -154,6 +168,8 @@ class AlarmScheduler {
           alive: (r['alive'] as num?)?.toInt() ?? 0,
           nextTrigger: (r['nextTrigger'] as num?)?.toInt() ?? -1,
           week: (r['week'] as num?)?.toInt() ?? -1,
+          notifEnabled: r['notifEnabled'] != false,
+          mode: (r['mode'] ?? 'both').toString(),
         );
       }
     } catch (_) {}
@@ -161,7 +177,8 @@ class AlarmScheduler {
         configured: 0, alive: 0, nextTrigger: -1, week: -1);
   }
 
-  /// 申请精确闹钟权限。  ///
+  /// 申请精确闹钟权限。
+  ///
   /// 原生侧在官方设置页跳不过去时会自动回退到本应用的系统设置页，
   /// 返回实际落到的页面标识：
   ///   granted     已授权，无需跳转

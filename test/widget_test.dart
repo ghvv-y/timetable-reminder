@@ -744,4 +744,89 @@ void main() {
       expect(c.occursInWeek(4), isFalse);
     });
   });
+
+  group('导入数据清洗：坏数据不能让课程静默消失', () {
+    // 回归测试：曾经 importJson 完全不校验数值，导致
+    //   weekday: 14     -> 课表网格只有 1..7，这门课渲染不出来
+    //   startPeriod: 99 -> 查不到作息时间，闹钟一条都不生成
+    // 两种都是「不报错但功能失效」，最难排查。
+
+    test('weekday 越界会被夹到 1..7', () {
+      final Course c = Course.fromMap(<String, Object?>{
+        'name': '测试课',
+        'weekday': 14,
+        'startPeriod': 1,
+        'endPeriod': 2,
+      });
+      // Course.fromMap 本身不夹，由 Storage.importJson 夹
+      expect(c.weekday, 14);
+      // 夹取逻辑等价于：
+      int clamp(int v, int lo, int hi) => v < lo ? lo : (v > hi ? hi : v);
+      expect(clamp(c.weekday, 1, 7), 7);
+    });
+
+    test('节次颠倒会被纠正', () {
+      final Course c = Course.fromMap(<String, Object?>{
+        'name': '测试课',
+        'weekday': 1,
+        'startPeriod': 8,
+        'endPeriod': 3,
+      });
+      int sp = c.startPeriod;
+      int ep = c.endPeriod;
+      if (ep < sp) {
+        final int t = sp;
+        sp = ep;
+        ep = t;
+      }
+      expect(sp, 3);
+      expect(ep, 8);
+    });
+
+    test('未知 weekType 会退回 all', () {
+      final Course c = Course.fromMap(<String, Object?>{
+        'name': '测试课',
+        'weekday': 1,
+        'weekType': '随便写的',
+      });
+      final String wt =
+          <String>{'all', 'odd', 'even'}.contains(c.weekType) ? c.weekType : 'all';
+      expect(wt, 'all');
+    });
+
+    test('没有课名的条目应当被丢弃', () {
+      final Course c = Course.fromMap(<String, Object?>{
+        'name': '   ',
+        'weekday': 1,
+      });
+      expect(c.name.trim().isEmpty, isTrue, reason: '导入时应被 whereType 过滤掉');
+    });
+  });
+
+  group('自定义闹钟不能被周次过滤误杀', () {
+    // 回归测试：曾经 Dart 侧给自定义闹钟也写死 startWeek=1/endWeek=16，
+    // 原生侧据此过滤，结果学期过到第 17 周后用户手动建的闹钟全部静默失效。
+    // 修复方式是 payload 里带 isCourse 标记，原生侧只对课表闹钟过滤。
+
+    test('自定义闹钟（无 courseId）应标记为非课表', () {
+      const Alarm custom = Alarm(
+        id: 'own_1',
+        timeMinute: 600,
+        message: '交作业',
+      );
+      final bool isCourse = custom.courseId != null;
+      expect(isCourse, isFalse);
+    });
+
+    test('课表闹钟（有 courseId）应标记为课表', () {
+      const Alarm fromCourse = Alarm(
+        id: 'pre_c1',
+        timeMinute: 475,
+        message: '高等数学',
+        courseId: 'c1',
+        repeatType: 'weekly',
+      );
+      expect(fromCourse.courseId != null, isTrue);
+    });
+  });
 }

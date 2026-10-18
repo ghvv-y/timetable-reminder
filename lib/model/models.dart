@@ -54,6 +54,10 @@ class Course {
   });
 
   Course copyWith({
+    // id 也允许改：导入时若 id 为空或重复，需要重新分配一个唯一 id。
+    // 不分配的话所有课程的闹钟 id 会撞成同一个（pre_ / post_），
+    // 结果只剩最后一条提醒生效。
+    String? id,
     String? name,
     int? weekday,
     int? startPeriod,
@@ -66,7 +70,7 @@ class Course {
     String? note,
   }) {
     return Course(
-      id: id,
+      id: id ?? this.id,
       name: name ?? this.name,
       weekday: weekday ?? this.weekday,
       startPeriod: startPeriod ?? this.startPeriod,

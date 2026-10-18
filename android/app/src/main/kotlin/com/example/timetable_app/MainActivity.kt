@@ -602,11 +602,20 @@ object AlarmScheduler {
             -1L
         }
 
+        // 通知权限：Android 13+ 没有 POST_NOTIFICATIONS 时，
+        // NotificationManager.notify() 是**静默失败**（不抛异常）。
+        // 也就是说提醒不会出现，而应用侧毫无感知 —— 必须显式检查。
+        val nm = context.getSystemService(Context.NOTIFICATION_SERVICE)
+                as android.app.NotificationManager
+        val notifEnabled = nm.areNotificationsEnabled()
+
         return mapOf(
             "configured" to configured.size,
             "alive" to alive,
             "nextTrigger" to next,
-            "week" to (currentWeekForFilter(context) ?: -1)
+            "week" to (currentWeekForFilter(context) ?: -1),
+            "notifEnabled" to notifEnabled,
+            "mode" to AlarmStore.mode(context)
         )
     }
 
@@ -697,14 +706,19 @@ object AlarmScheduler {
     /**
      * 判断某个闹钟本周要不要响。
      *
-     * 自定义闹钟（没有周次字段）一律要响；课表闹钟则要同时满足：
-     *   1. 当前周次在 [startWeek, endWeek] 内
-     *   2. 单双周匹配（weekType = odd/even 时）
+     * 只有**课表闹钟**才按周次过滤。自定义闹钟是用户手动建的
+     * （例如「每周三 14:00 提醒我交作业」），跟学期周次无关，任何时候都该响。
+     *
+     * 【踩过的坑】这里曾经靠「没有 startWeek 字段就用默认值 1、16」来判断，
+     * 但 Dart 侧其实**总是会传**这两个字段（自定义闹钟传的是 1 和 16）。
+     * 结果学期过到第 17 周以后，用户手动建的闹钟就全部静默失效了。
+     * 现在改用显式的 isCourse 标记。
      */
     fun isActiveThisWeek(alarm: JSONObject, week: Int?): Boolean {
-        if (week == null) return true          // 算不出周次就不过滤
+        // 自定义闹钟：不参与周次过滤
+        if (!alarm.optBoolean("isCourse", false)) return true
 
-        // 非课表闹钟（自定义）没有这些字段，用默认值全通过
+        if (week == null) return true          // 算不出周次就不过滤
         val sw = alarm.optInt("startWeek", 1)
         val ew = alarm.optInt("endWeek", 16)
         val type = alarm.optString("weekType", "all")

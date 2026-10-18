@@ -501,7 +501,11 @@ def build_courses(cells, periods):
             parts = split_paired_cell(texts)
             compressed = len(parts) > 1
             for part, offset in parts:
+                # 【必须夹在 1..7】公式是 2×列号-1+偏移。列号大时会算出
+                # 8 / 13 / 14 这类非法星期（例：c=7 且 offset=1 → 14）。
+                # 越界的星期会让 App 课表渲染出错，提醒也永远不触发。
                 wd = (2 * c - 1 + offset) if compressed else c
+                wd = max(1, min(7, wd))
                 info = parse_cell(part, period)
 
                 # 没有课名 = 本门课的续行（只有教室/教师），并入上一门课。

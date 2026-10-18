@@ -96,11 +96,80 @@ class Storage {
   void importJson(String content) {
     final Map<String, Object?> data =
         Map<String, Object?>.from(jsonDecode(content) as Map);
-    courses = _list(data['courses']).map(Course.fromMap).toList();
+
+    // 【必须清洗】导入的文件可能是手写的（README 里就鼓励手写），
+    // 也可能是别的版本的识别工具生成的。以下坏数据都不会报错，
+    // 但会造成「课程静默消失 / 永远不提醒」：
+    //   weekday: 14      -> 课表网格只有 1..7，这门课渲染不出来
+    //   startPeriod: 99  -> 查不到作息时间，闹钟连一条都不会生成
+    //   id 缺失/重复     -> 闹钟 id 变成 pre_ / post_ 全撞车，
+    //                       所有课程只剩最后一条提醒
+    final List<Course> raw = _list(data['courses']).map(Course.fromMap).toList();
+
+    final Set<String> usedIds = <String>{};
+    final List<Course> cleaned = <Course>[];
+    int seq = 0;
+    for (final Course original in raw) {
+      final Course? c = _sanitizeCourse(original);
+      if (c == null) continue;
+
+      String id = c.id;
+      if (id.isEmpty || usedIds.contains(id)) {
+        id = 'c_${DateTime.now().microsecondsSinceEpoch}_${seq++}';
+      }
+      usedIds.add(id);
+      cleaned.add(id == c.id ? c : c.copyWith(id: id));
+    }
+
+    courses = cleaned;
     periodTimes = _list(data['periods']).map(PeriodTime.fromMap).toList();
     alarms = _list(data['alarms']).map(Alarm.fromMap).toList();
     logs = <SmsLog>[];
     save();
+  }
+
+  /// 把课程数据夹到合法范围；没有课名的直接丢掉（返回 null）
+  ///
+  /// 注意 id 不在这里生成 —— 唯一性要在 importJson 里统一定，
+  /// 因为这里看不到其它课程。
+  static Course? _sanitizeCourse(Course c) {
+    final String name = c.name.trim();
+    if (name.isEmpty) return null;
+
+    int clamp(int v, int lo, int hi) => v < lo ? lo : (v > hi ? hi : v);
+
+    // 星期：1..7
+    final int weekday = clamp(c.weekday, 1, 7);
+    // 节次：1..20（一般 12 节，留点余量）
+    int sp = clamp(c.startPeriod, 1, 20);
+    int ep = clamp(c.endPeriod, 1, 20);
+    if (ep < sp) {
+      final int t = sp;
+      sp = ep;
+      ep = t;
+    }
+    // 周次：1..30
+    int sw = clamp(c.startWeek, 1, 30);
+    int ew = clamp(c.endWeek, 1, 30);
+    if (ew < sw) {
+      final int t = sw;
+      sw = ew;
+      ew = t;
+    }
+    // 单双周只认这三个值
+    final String wt = <String>{'all', 'odd', 'even'}.contains(c.weekType)
+        ? c.weekType
+        : 'all';
+
+    return c.copyWith(
+      name: name,
+      weekday: weekday,
+      startPeriod: sp,
+      endPeriod: ep,
+      startWeek: sw,
+      endWeek: ew,
+      weekType: wt,
+    );
   }
 
   /// 异步落盘

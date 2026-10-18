@@ -144,6 +144,20 @@ class SmsAlarmReceiver : BroadcastReceiver() {
         }
     }
 
+    /**
+     * 「仅一次」的闹钟触发后，把它从配置里移除。
+     *
+     * 【踩过的坑】这里曾经只传了前 4 个参数：
+     *     AlarmStore.save(context, arr, smsTo, subId)
+     * 而 save 后来加上了 mode / termStart / weekOverride 三个参数（有默认值），
+     * 于是每次一次性闹钟触发后：
+     *     提醒方式  「仅通知」  ->  变回「通知+短信」
+     *     学期开始日  已设置    ->  被清空
+     *     手动周次    已设置    ->  被清零
+     * 也就是用户设置被悄悄重置。
+     * 教训：加参数时用了默认值，老调用点会静默丢掉新字段。
+     * 现在把当前值原样带回去。
+     */
     private fun removeAlarm(context: Context, alarmId: String) {
         val rest = AlarmStore.all(context).filter { it.optString("id") != alarmId }
         val arr = org.json.JSONArray()
@@ -154,7 +168,21 @@ class SmsAlarmReceiver : BroadcastReceiver() {
             context,
             arr.toString(),
             AlarmStore.smsTo(context),
-            AlarmStore.subscriptionId(context)
+            AlarmStore.subscriptionId(context),
+            AlarmStore.mode(context),
+            AlarmStore.termStart(context),
+            AlarmStore.weekOverride(context)
         )
+
+        // 同时把这条闹钟的 PendingIntent 取消掉。
+        // 不取消的话它会一直留在系统里，健康自检会把它算成"还挂着"，
+        // 让用户误以为闹钟没问题。
+        try {
+            val am = context.getSystemService(Context.ALARM_SERVICE)
+                    as android.app.AlarmManager
+            am.cancel(AlarmScheduler.pendingIntent(context, alarmId))
+        } catch (e: Exception) {
+            Log.w("TimetableApp", "取消 PendingIntent 失败: ${e.message}")
+        }
     }
 }

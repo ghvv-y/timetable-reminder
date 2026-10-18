@@ -428,7 +428,10 @@ class AppState extends ChangeNotifier {
         'repeatType': a.repeatType,
         'weekdays': a.weekdays,
         'weekday': a.weekday,
-        // 周次：自定义闹钟用默认值（1-16 全周），不受影响
+        // 是不是课表闹钟。
+        // 自定义闹钟（用户手动建的）跟学期周次无关，原生侧靠这个标记
+        // 跳过周次过滤 —— 否则学期过到第 17 周后它们会静默失效。
+        'isCourse': c != null,
         'startWeek': c?.startWeek ?? 1,
         'endWeek': c?.endWeek ?? 16,
         'weekType': c?.weekType ?? 'all',
