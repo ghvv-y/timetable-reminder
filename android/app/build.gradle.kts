@@ -25,6 +25,25 @@ android {
         targetSdk = flutter.targetSdkVersion
         versionCode = flutter.versionCode
         versionName = flutter.versionName
+
+        // 只保留真机 CPU 架构
+        //
+        // 为什么必须裁：onnxruntime 每种架构约 16MB，Flutter 引擎也有多份。
+        // 实测打全量时 x86_64 一项就占 30MB —— 而 x86_64 只用于模拟器，
+        // 手机（含绝大多数国产机）都是 arm64。
+        // 需要模拟器调试时，把 "x86" / "x86_64" 从下面的 excludes 里去掉即可。
+        ndk {
+            abiFilters += listOf("arm64-v8a", "armeabi-v7a")
+        }
+    }
+
+    // maven 依赖（onnxruntime）的原生库不受 --target-platform 控制，
+    // 必须在打包阶段显式排除，否则模拟器架构的 .so 照样会进 APK。
+    packaging {
+        jniLibs {
+            excludes += "lib/x86/**"
+            excludes += "lib/x86_64/**"
+        }
     }
 
     buildTypes {

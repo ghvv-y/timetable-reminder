@@ -14,6 +14,7 @@ import androidx.core.content.ContextCompat
 import io.flutter.embedding.android.FlutterActivity
 import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.plugin.common.MethodChannel
+import com.example.timetable_app.ocr.PpfOcrBridge
 import org.json.JSONArray
 import org.json.JSONObject
 import java.util.Calendar
@@ -34,6 +35,9 @@ class MainActivity : FlutterActivity() {
     private val fileChannel = "timetable_app/file"
     private val screenChannel = "timetable_app/screen"
     private val imageChannel = "timetable_app/image"
+
+    /** 离线 PP-OCR 识别通道（逐格识别，替代 ML Kit 整图） */
+    private val ocrChannel = "timetable_app/ocr"
 
     /** 文件选择请求码 */
     private val requestPickFile = 4711
@@ -144,6 +148,37 @@ class MainActivity : FlutterActivity() {
                                 ImagePreprocess.prepare(this, path, scale, enhance)
                             )
                         }
+                    }
+                    else -> result.notImplemented()
+                }
+            }
+
+        // 离线 PP-OCR 识别：图片 -> 格子文字（逐格识别，替代 ML Kit 整图）
+        MethodChannel(flutterEngine.dartExecutor.binaryMessenger, ocrChannel)
+            .setMethodCallHandler { call, result ->
+                when (call.method) {
+                    "recognize" -> {
+                        val path = call.argument<String>("imagePath") ?: ""
+                        if (path.isEmpty()) {
+                            result.error("bad_arg", "imagePath 为空", null)
+                            return@setMethodCallHandler
+                        }
+                        // 识别是重 CPU 操作（大图约数秒），必须离开主线程
+                        Thread {
+                            try {
+                                val json = PpfOcrBridge.recognize(this, path)
+                                runOnUiThread { result.success(json) }
+                            } catch (e: Throwable) {
+                                Diag.log(this, "PP-OCR 识别失败：${e.message}")
+                                runOnUiThread {
+                                    result.error(
+                                        "ocr_failed",
+                                        e.message ?: e.javaClass.simpleName,
+                                        null
+                                    )
+                                }
+                            }
+                        }.start()
                     }
                     else -> result.notImplemented()
                 }

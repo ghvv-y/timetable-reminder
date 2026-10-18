@@ -16,6 +16,8 @@ import 'package:provider/provider.dart';
 import '../model/models.dart';
 import '../model/period_time.dart';
 import '../ocr/table_parser.dart';
+import '../ocr/cell_parser.dart';
+import '../ocr/ppocr_service.dart';
 import '../ocr/text_recognizer.dart';
 import '../services/app_state.dart';
 import '../services/screen_capture.dart';
@@ -30,6 +32,13 @@ class OcrPage extends StatefulWidget {
 
 class _OcrPageState extends State<OcrPage> {
   bool _busy = false;
+
+  /// 是否使用离线 PP-OCR 引擎
+  ///
+  /// 安卓默认开启：Kotlin 侧切格 + 逐格识别，和桌面工具同一套模型，
+  /// 时间栏与中文课名的准确率远高于旧的 ML Kit 整图识别。
+  /// 保留 ML Kit 作为对照/兜底（万一某个机型跑不动 ONNX）。
+  bool _usePpOcr = true;
 
   /// 识别产物（结构化文本块 + 原始文字）
   OcrOutcome? _outcome;
@@ -175,9 +184,61 @@ class _OcrPageState extends State<OcrPage> {
   }
 
   /// 识别 + 解析的公共流程
+  ///
+  /// 两条引擎路径：
+  ///   - PP-OCR（推荐，安卓）：Kotlin 侧切格 + 逐格识别，桌面端验证过的方式，
+  ///     时间栏和中文课名都准；识别结果按行列返回，由 cell_parser 解析。
+  ///   - ML Kit（旧，兼容）：整图 OCR，中文课名容易串行，保留作对照/兜底。
   Future<void> _recognizePath(String path) async {
     try {
       final Stopwatch sw = Stopwatch()..start();
+
+      if (_usePpOcr && PpfOcrService.isSupported) {
+        final CellParseResult parsed = await PpfOcrService.recognize(path);
+        sw.stop();
+        if (!mounted) return;
+
+        // 把格子文字拼成「原始文字」展示，格式和 ML Kit 路径一致，
+        // 这样界面上的核对卡片不用改。
+        final List<TextBlock> blocks = <TextBlock>[];
+        final StringBuffer raw = StringBuffer();
+        double y = 0;
+        for (final OcrCell c in parsed.cells) {
+          for (final String line in c.lines) {
+            blocks.add(TextBlock(
+              text: line,
+              left: 0,
+              top: y,
+              right: 0,
+              bottom: y + 1,
+            ));
+            raw.writeln(line);
+            y += 1;
+          }
+        }
+
+        setState(() {
+          _outcome = OcrOutcome(blocks: blocks, rawText: raw.toString());
+          _result = ParseResult(
+            periodTimes: parsed.periods,
+            courses: parsed.courses,
+            warnings: parsed.warnings,
+          );
+          _lastElapsedMs = sw.elapsedMilliseconds;
+        });
+
+        if (parsed.cells.isEmpty) {
+          _toast('这张图没有认出任何文字，换清晰一些、正对屏幕的截图再试');
+        } else if (parsed.courses.isEmpty && parsed.periods.isEmpty) {
+          _toast(parsed.warnings.isEmpty
+              ? '认到了文字但没解析出课表，请展开「识别到的原始文字」查看'
+              : parsed.warnings.first);
+        } else {
+          _toast('离线引擎识别出 ${parsed.courses.length} 门课，请核对后导入');
+        }
+        return;
+      }
+
       final OcrOutcome outcome = await recognizeBlocks(XFile(path));
       sw.stop();
       final ParseResult result = TableParser.parse(outcome.blocks);
@@ -248,6 +309,41 @@ class _OcrPageState extends State<OcrPage> {
         const Text('支持识别课程名称与地点，并理解课表边上标注的作息时间（第几节 = 几点到几点）',
             style: TextStyle(fontSize: 12.5, color: Color(0xFF888888))),
         const SizedBox(height: 12),
+        // 识别引擎选择（只有安卓有离线引擎）
+        if (PpfOcrService.isSupported) ...<Widget>[
+          Row(
+            children: <Widget>[
+              const Text('识别引擎：',
+                  style: TextStyle(fontSize: 12.5, color: Color(0xFF666666))),
+              const SizedBox(width: 6),
+              ChoiceChip(
+                label: const Text('离线 PP-OCR（推荐）',
+                    style: TextStyle(fontSize: 12)),
+                selected: _usePpOcr,
+                onSelected: _busy
+                    ? null
+                    : (bool v) => setState(() => _usePpOcr = true),
+              ),
+              const SizedBox(width: 8),
+              ChoiceChip(
+                label: const Text('ML Kit（旧）',
+                    style: TextStyle(fontSize: 12)),
+                selected: !_usePpOcr,
+                onSelected: _busy
+                    ? null
+                    : (bool v) => setState(() => _usePpOcr = false),
+              ),
+            ],
+          ),
+          const SizedBox(height: 6),
+          Text(
+            _usePpOcr
+                ? '离线 PP-OCR：切格逐格识别，时间栏和中文课名更准，首次识别会慢几秒'
+                : 'ML Kit：整图识别，中文课名容易串行，只在离线引擎异常时使用',
+            style: const TextStyle(fontSize: 11.5, color: Color(0xFF999999)),
+          ),
+          const SizedBox(height: 10),
+        ],
         Row(
           children: <Widget>[
             Expanded(

@@ -1,4 +1,4 @@
-﻿# 一键打包并把安装包路径打印出来
+# 一键打包并把安装包路径打印出来
 #
 # 用法：
 #   powershell -ExecutionPolicy Bypass -File .\scripts\07-build-and-publish.ps1
@@ -110,7 +110,7 @@ while ($attempt -lt $maxAttempts) {
     }
     Push-Location $ProjRoot
     try {
-        & $flutter build apk --release
+        & $flutter build apk --release --target-platform android-arm,android-arm64
         $code = $LASTEXITCODE
     } finally {
         Pop-Location
