@@ -89,6 +89,26 @@ void main() {
       expect(w.first.weekType, 'odd');
       expect(w.first.endWeek, 15, reason: '16 周学期里的最后一个单周是 15');
     });
+
+    test('3 项的短列表不推断成单周（避免多生成提醒）', () {
+      // 真实课表可能真的只在 3,5,7 周上课
+      final List<WeekSpec> w = parseWeekExpr('3,5,7', semesterMax: 16);
+      expect(w.length, 3, reason: '短列表应当拆成三个单周，而不是 3-15 单周');
+      expect(w.map((WeekSpec x) => x.startWeek).toList(), <int>[3, 5, 7]);
+    });
+
+    test('截断补齐时会给出警告', () {
+      final List<String> warn = <String>[];
+      parseWeekExpr('3,5,7,9', semesterMax: 16, warnings: warn);
+      expect(warn, isNotEmpty);
+      expect(warn.first, contains('请核对'));
+    });
+
+    test('完整单双周列表不会误报警告', () {
+      final List<String> warn = <String>[];
+      parseWeekExpr('3,5,7,9,11,13,15周', semesterMax: 16, warnings: warn);
+      expect(warn, isEmpty);
+    });
   });
 
   group('URP 格式解析', () {
@@ -190,9 +210,39 @@ void main() {
       expect(c.startPeriod, 1);
     });
 
+    test('地点比课名长也不会抢课名', () {
+      const String generic = '''
+体育 校本部体育场风雨操场1楼羽毛球馆 周一 5-6节 3-18周
+大学英语 校本部冷链大楼冷链-A202 周二 1-2节 7-8周
+''';
+      final PasteParseResult? r = parsePastedSchedule(generic);
+      expect(r, isNotNull);
+      final Course c = r!.courses.firstWhere((Course x) => x.weekday == 1);
+      expect(c.name, contains('体育'));
+      expect(c.name, isNot(contains('操场')));
+    });
+
     test('乱七八糟的文本返回 null', () {
       expect(parsePastedSchedule('今天天气不错，出门记得带伞。'), isNull);
       expect(parsePastedSchedule(''), isNull);
+    });
+  });
+
+  group('剪贴板制表符被转成空格时', () {
+    // 部分安卓机型复制网页时会把 \t 变成空格——必须能扛住
+    test('URP 文本空格分隔也能解析', () {
+      final String spaced = urpSample
+          .replaceAll('\t', '  ')
+          .replaceAll(RegExp(r'  +'), '  ');
+      final PasteParseResult? r = parsePastedSchedule(spaced);
+      expect(r, isNotNull, reason: '空格分隔的 URP 文本必须能解析');
+      expect(r!.courses, isNotEmpty);
+      final Course math = r.courses.firstWhere(
+        (Course c) => c.name.contains('高等数学') && c.weekday == 2,
+      );
+      expect(math.teacher, '张怡通*');
+      expect(math.startWeek, 3);
+      expect(math.endWeek, 16);
     });
   });
 }
