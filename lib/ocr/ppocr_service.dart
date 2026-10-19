@@ -16,6 +16,8 @@ import 'dart:io';
 import 'package:flutter/services.dart';
 
 import 'cell_parser.dart';
+import 'course_dictionary.dart';
+import '../model/models.dart';
 
 /// 识别失败（带可读原因，便于界面直接展示）
 class PpfOcrException implements Exception {
@@ -36,7 +38,13 @@ class PpfOcrService {
   ///
   /// [imagePath] 本地图片路径。耗时操作（大图约 3~10 秒），
   /// 调用方应在 UI 上显示进度。
-  static Future<CellParseResult> recognize(String imagePath) async {
+  ///
+  /// [dictionary] 个人课表词典：用户若已导入过课表（如通过粘贴），
+  /// 就用它纠正 OCR 的错字——这是「用准确的路校准方便的路」。
+  static Future<CellParseResult> recognize(
+    String imagePath, {
+    CourseDictionary? dictionary,
+  }) async {
     if (!isSupported) {
       throw PpfOcrException('离线识别目前只支持安卓');
     }
@@ -88,7 +96,36 @@ class PpfOcrService {
       throw PpfOcrException(
           parsed.warnings.isEmpty ? '没解析出课表内容' : parsed.warnings.first);
     }
-    return parsed;
+
+    // 词典纠正：用已导入的课表把 OCR 错字改回来
+    if (dictionary == null || dictionary.isEmpty) return parsed;
+
+    final DictionaryCorrector corrector = DictionaryCorrector(dictionary);
+    final List<Course> fixedCourses = <Course>[];
+    final List<Correction> allFixes = <Correction>[];
+    for (final Course c in parsed.courses) {
+      final ({String name, String teacher, String room, List<Correction> fixes}) r =
+          corrector.correct(name: c.name, teacher: c.teacher, room: c.room);
+      allFixes.addAll(r.fixes);
+      fixedCourses.add(r.fixes.isEmpty
+          ? c
+          : c.copyWith(name: r.name, teacher: r.teacher, room: r.room));
+    }
+
+    final List<String> warnings = List<String>.from(parsed.warnings);
+    if (allFixes.isNotEmpty) {
+      final List<String> samples =
+          allFixes.take(3).map((Correction x) => x.toString()).toList();
+      warnings.add('已按已导入的课表修正 ${allFixes.length} 处：${samples.join('，')}'
+          '${allFixes.length > 3 ? ' …' : ''}');
+    }
+
+    return CellParseResult(
+      courses: fixedCourses,
+      periods: parsed.periods,
+      warnings: warnings,
+      cells: parsed.cells,
+    );
   }
 
   /// 直接返回原始格子文字（排查用，界面上可以展开看）

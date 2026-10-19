@@ -49,6 +49,9 @@ Thumbs.db
 # 本机专用脚本（含个人路径，不入库）
 scripts/_local/
 
+# 无框线表格识别实验材料（LORE 模型 84MB + 第三方源码，不入库）
+tools/_lineless/
+
 # ===== Python =====
 __pycache__/
 *.pyc
