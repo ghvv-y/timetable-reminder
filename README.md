@@ -232,7 +232,7 @@ flutter test
 
 ## 许可
 
-**[GNU General Public License v3.0](LICENSE)**（GPL-3.0）
+**[GNU General Public License v3.0](LICENSE)**（GPL-3.0）· 版权声明见 [COPYRIGHT](COPYRIGHT)
 
 简单说：**你可以自由使用、修改、分发，但如果你分发修改后的版本，必须同样以 GPL-3.0 开源。**
 
