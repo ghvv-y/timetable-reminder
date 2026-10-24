@@ -80,6 +80,23 @@ object PpfOcrBridge {
     }
 
     /**
+     * 无框线识别：图片路径 -> 网格 JSON。
+     *
+     * 用于「教务系统网页版截图」这类**没有绘制表格线**的课表
+     * （彩色色块拼接，GridCutter 检测不到竖线）。
+     *
+     * 返回 { rows:[时间], days:[1..7], grid:[row][day][slot][行文字], stats:{} }
+     */
+    fun recognizeBorderless(context: Context, imagePath: String): String {
+        val (det, rec) = ensureModels(context)
+        val image = loadImage(imagePath)
+        Log.i(TAG, "无框线识别开始 ${image.width}x${image.height}")
+        return OcrEngine(det, rec).use { engine ->
+            BorderlessOcr.recognize(engine, image)
+        }
+    }
+
+    /**
      * 完整识别：图片路径 -> 格子文字。
      *
      * 注意：这是阻塞操作（大图约数秒），调用方必须放在子线程。

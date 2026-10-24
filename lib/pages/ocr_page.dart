@@ -242,10 +242,21 @@ class _OcrPageState extends State<OcrPage> {
 
       if (_usePpOcr && PpfOcrService.isSupported) {
         // 用已导入的课表当词典纠正 OCR 错字（有则用，无则跳过）
-        final CellParseResult parsed = await PpfOcrService.recognize(
-          path,
-          dictionary: CourseDictionary.fromCourses(context.read<AppState>().courses),
-        );
+        final CourseDictionary dict =
+            CourseDictionary.fromCourses(context.read<AppState>().courses);
+        CellParseResult parsed;
+        try {
+          parsed = await PpfOcrService.recognize(path, dictionary: dict);
+        } on PpfOcrException catch (e) {
+          // 有框线算法失败时自动改用无框线算法重试。
+          //
+          // 教务系统网页版课表是彩色色块拼接、没有绘制表格线，
+          // 网格检测会判成「无表格」。这类图必须走另一条路：
+          // 整图 OCR + 星期表头/时间栏锚点排版。
+          if (!e.message.contains('表格线')) rethrow;
+          debugPrint('有框线识别失败，改用无框线算法重试：${e.message}');
+          parsed = await PpfOcrService.recognizeBorderless(path, dictionary: dict);
+        }
         sw.stop();
         if (!mounted) return;
 
@@ -1059,6 +1070,9 @@ class _OcrPageState extends State<OcrPage> {
                     ),
                   ),
                 const SizedBox(height: 12),
+                // 两种导入方式：
+                //   覆盖 = 用识别结果替换整张课表（换学期、重新识别时用）
+                //   合并 = 只把新课程追加进去（补录、分批导入时用，不丢已有课程）
                 Row(
                   children: <Widget>[
                     Expanded(
@@ -1074,10 +1088,41 @@ class _OcrPageState extends State<OcrPage> {
                                       '已导入 ${r.courses.length} 门课程，并生成上下课提醒');
                                 }
                               },
-                        child: const Text('确认导入课表'),
+                        child: const Text('覆盖导入'),
                       ),
                     ),
                     const SizedBox(width: 10),
+                    Expanded(
+                      child: OutlinedButton(
+                        onPressed: r.courses.isEmpty &&
+                                r.periodTimes.isEmpty
+                            ? null
+                            : () async {
+                                final int before = state.courses.length;
+                                await state
+                                    .importParsed(r, replace: false);
+                                await state.regenerateCourseAlarms();
+                                if (context.mounted) {
+                                  final int added =
+                                      state.courses.length - before;
+                                  _toast(added > 0
+                                      ? '已合并 $added 门课程（原有 $before 门保留）'
+                                      : '没有新增课程（这些课已经在课表里了）');
+                                }
+                              },
+                        child: const Text('合并导入'),
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 8),
+                const Text(
+                  '覆盖导入会替换整张课表；合并导入只追加新课程，适合分批补录。',
+                  style: TextStyle(fontSize: 11.5, color: Color(0xFF999999)),
+                ),
+                const SizedBox(height: 6),
+                Row(
+                  children: <Widget>[
                     OutlinedButton(
                       onPressed: () => setState(() {
                         _result = null;

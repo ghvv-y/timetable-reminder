@@ -61,21 +61,43 @@ class MatchResult {
 }
 
 /// 个人课表词典
+///
+/// 相似度阈值可调：不同学校课名差异大（简称「高数」vs 全称
+/// 「高等数学A(1)」），一刀切的阈值会一边误纠正、一边纠正不动。
+/// 阈值越高越保守（宁可不动），越低越激进（可能改错）。
 class CourseDictionary {
   final List<String> names;
   final List<String> teachers;
   final List<String> rooms;
 
+  /// 课名匹配阈值
+  final double nameThreshold;
+
+  /// 教师匹配阈值
+  final double teacherThreshold;
+
+  /// 地点匹配阈值（地点格式固定，默认更严格，
+  /// 避免把 A202 改成 B202 这种「差一位」的误纠正）
+  final double roomThreshold;
+
   const CourseDictionary({
     this.names = const <String>[],
     this.teachers = const <String>[],
     this.rooms = const <String>[],
+    this.nameThreshold = 0.55,
+    this.teacherThreshold = 0.6,
+    this.roomThreshold = 0.7,
   });
 
   bool get isEmpty => names.isEmpty && teachers.isEmpty && rooms.isEmpty;
 
   /// 从课程列表构建词典
-  static CourseDictionary fromCourses(Iterable<Object?> courses) {
+  static CourseDictionary fromCourses(
+    Iterable<Object?> courses, {
+    double nameThreshold = 0.55,
+    double teacherThreshold = 0.6,
+    double roomThreshold = 0.7,
+  }) {
     final Set<String> names = <String>{};
     final Set<String> teachers = <String>{};
     final Set<String> rooms = <String>{};
@@ -97,6 +119,9 @@ class CourseDictionary {
       names: names.toList(),
       teachers: teachers.toList(),
       rooms: rooms.toList(),
+      nameThreshold: nameThreshold,
+      teacherThreshold: teacherThreshold,
+      roomThreshold: roomThreshold,
     );
   }
 
@@ -126,9 +151,30 @@ class CourseDictionary {
     return null;
   }
 
-  MatchResult? matchName(String fragment) => bestMatch(fragment, names);
-  MatchResult? matchTeacher(String fragment) => bestMatch(fragment, teachers);
-  MatchResult? matchRoom(String fragment) => bestMatch(fragment, rooms, minScore: 0.7);
+  MatchResult? matchName(String fragment) =>
+      bestMatch(fragment, names, minScore: nameThreshold);
+
+  MatchResult? matchTeacher(String fragment) =>
+      bestMatch(fragment, teachers, minScore: teacherThreshold);
+
+  MatchResult? matchRoom(String fragment) =>
+      bestMatch(fragment, rooms, minScore: roomThreshold);
+
+  /// 复制并调整阈值（供设置页/调试用）
+  CourseDictionary withThresholds({
+    double? name,
+    double? teacher,
+    double? room,
+  }) {
+    return CourseDictionary(
+      names: names,
+      teachers: teachers,
+      rooms: rooms,
+      nameThreshold: name ?? nameThreshold,
+      teacherThreshold: teacher ?? teacherThreshold,
+      roomThreshold: room ?? roomThreshold,
+    );
+  }
 }
 
 /// 一次纠正的记录（用于界面提示「已按词典修正」）

@@ -17,6 +17,7 @@ import 'package:flutter/services.dart';
 
 import 'cell_parser.dart';
 import 'course_dictionary.dart';
+import 'grid_parser.dart';
 import '../model/models.dart';
 
 /// 识别失败（带可读原因，便于界面直接展示）
@@ -125,6 +126,74 @@ class PpfOcrService {
       periods: parsed.periods,
       warnings: warnings,
       cells: parsed.cells,
+    );
+  }
+
+  /// 无框线课表识别（教务系统网页版截图、彩色块拼接、没有绘制表格线）
+  ///
+  /// 走的是另一条算法：整图 OCR 拿文字块 -> 用星期表头/时间栏当锚点排版。
+  /// GridCutter 在这种图上检测不到竖线，会把整张图判成「无表格」。
+  static Future<CellParseResult> recognizeBorderless(
+    String imagePath, {
+    CourseDictionary? dictionary,
+  }) async {
+    if (!isSupported) {
+      throw PpfOcrException('离线识别目前只支持安卓');
+    }
+    if (!File(imagePath).existsSync()) {
+      throw PpfOcrException('找不到图片文件');
+    }
+
+    String? raw;
+    try {
+      raw = await _channel.invokeMethod<String>(
+        'recognizeBorderless',
+        <String, Object>{'imagePath': imagePath},
+      );
+    } on PlatformException catch (e) {
+      throw PpfOcrException(e.message ?? '识别失败');
+    } on MissingPluginException {
+      throw PpfOcrException('当前安装包还不支持无框线识别，请更新 App');
+    }
+
+    if (raw == null || raw.isEmpty) {
+      throw PpfOcrException('识别没有返回结果');
+    }
+
+    final GridParseResult parsed = parseGridJson(raw);
+    if (parsed.courses.isEmpty && parsed.periods.isEmpty) {
+      throw PpfOcrException('这张图里没识别出课表内容');
+    }
+
+    if (dictionary == null || dictionary.isEmpty) {
+      return CellParseResult(
+        courses: parsed.courses,
+        periods: parsed.periods,
+        warnings: parsed.warnings,
+      );
+    }
+
+    final DictionaryCorrector corrector = DictionaryCorrector(dictionary);
+    final List<Course> fixed = <Course>[];
+    final List<Correction> fixes = <Correction>[];
+    for (final Course c in parsed.courses) {
+      final ({String name, String teacher, String room, List<Correction> fixes}) r =
+          corrector.correct(name: c.name, teacher: c.teacher, room: c.room);
+      fixes.addAll(r.fixes);
+      fixed.add(r.fixes.isEmpty
+          ? c
+          : c.copyWith(name: r.name, teacher: r.teacher, room: r.room));
+    }
+
+    final List<String> warnings = List<String>.from(parsed.warnings);
+    if (fixes.isNotEmpty) {
+      warnings.add('已按已导入的课表修正 ${fixes.length} 处');
+    }
+
+    return CellParseResult(
+      courses: fixed,
+      periods: parsed.periods,
+      warnings: warnings,
     );
   }
 

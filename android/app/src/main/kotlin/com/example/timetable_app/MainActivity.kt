@@ -180,6 +180,29 @@ class MainActivity : FlutterActivity() {
                             }
                         }.start()
                     }
+                    "recognizeBorderless" -> {
+                        val path = call.argument<String>("imagePath") ?: ""
+                        if (path.isEmpty()) {
+                            result.error("bad_arg", "imagePath 为空", null)
+                            return@setMethodCallHandler
+                        }
+                        // 无框线识别同样是重 CPU 操作
+                        Thread {
+                            try {
+                                val json = PpfOcrBridge.recognizeBorderless(this, path)
+                                runOnUiThread { result.success(json) }
+                            } catch (e: Throwable) {
+                                Diag.log(this, "无框线识别失败：${e.message}")
+                                runOnUiThread {
+                                    result.error(
+                                        "ocr_failed",
+                                        e.message ?: e.javaClass.simpleName,
+                                        null
+                                    )
+                                }
+                            }
+                        }.start()
+                    }
                     else -> result.notImplemented()
                 }
             }
