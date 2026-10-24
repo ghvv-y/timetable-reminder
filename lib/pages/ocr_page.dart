@@ -1,3 +1,11 @@
+// 课表提醒 (Timetable Reminder)
+// Copyright (C) 2026 课表提醒 contributors
+// SPDX-License-Identifier: GPL-3.0-or-later
+//
+// 本程序是自由软件：你可以依据 GNU General Public License 第 3 版
+// （或你选择的更高版本）的条款重新分发和/或修改它。
+// 协议全文见项目根目录的 LICENSE 文件。
+//
 // 识别页：从课表截图 / 拍照中识别课程，并理解边侧标注的作息时间
 //
 // 流程：选图 → 文字识别 → 划分课程格与时间栏 → 对齐节次与时间 → 人工确认 → 入库

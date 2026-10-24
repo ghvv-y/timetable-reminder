@@ -1,3 +1,11 @@
+// 课表提醒 (Timetable Reminder)
+// Copyright (C) 2026 课表提醒 contributors
+// SPDX-License-Identifier: GPL-3.0-or-later
+//
+// 本程序是自由软件：你可以依据 GNU General Public License 第 3 版
+// （或你选择的更高版本）的条款重新分发和/或修改它。
+// 协议全文见项目根目录的 LICENSE 文件。
+//
 // 全局应用状态：课程、作息时间、闹钟、设置、短信日志
 //
 // 统一在这里维护，界面只读状态、只调方法，保证手机与电脑两端行为一致。

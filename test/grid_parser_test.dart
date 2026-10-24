@@ -1,3 +1,11 @@
+// 课表提醒 (Timetable Reminder)
+// Copyright (C) 2026 课表提醒 contributors
+// SPDX-License-Identifier: GPL-3.0-or-later
+//
+// 本程序是自由软件：你可以依据 GNU General Public License 第 3 版
+// （或你选择的更高版本）的条款重新分发和/或修改它。
+// 协议全文见项目根目录的 LICENSE 文件。
+//
 // 无框线课表网格解析测试
 //
 // 输入是原生侧 BorderlessOcr 输出的 JSON 结构（用真实识别结果手工还原），
