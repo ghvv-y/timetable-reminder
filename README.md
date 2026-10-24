@@ -232,9 +232,37 @@ flutter test
 
 ## 许可
 
-[MIT](LICENSE)
+**[GNU General Public License v3.0](LICENSE)**（GPL-3.0）
 
-第三方依赖均为 MIT / BSD / Apache 2.0 许可。课表识别使用 [RapidOCR](https://github.com/RapidAI/RapidOCR)（Apache 2.0）。
+简单说：**你可以自由使用、修改、分发，但如果你分发修改后的版本，必须同样以 GPL-3.0 开源。**
+
+具体含义：
+
+| 你可以 | 需要遵守 |
+| --- | --- |
+| 自由使用、拿去改 | 分发改过的版本时，必须公开源码并同样用 GPL-3.0 |
+| 商业使用（包括收费分发）| 同上，收费可以，但源码必须开放 |
+| 自己私下改着用 | 不分发就不用开源——GPL 只管「分发」 |
+
+它**不能**阻止别人：拿原版直接用、在内部使用改过的版本而不外传、或者商业使用。
+
+### ⚠️ 版本边界
+
+**v0.12.0 起是 GPL-3.0**；v0.12.0 之前发布的版本是 MIT——已按 MIT 拿到的副本，其授权不会因为这次变更而失效（许可证不能追溯撤销）。从本仓库后续 commit 起，代码按 GPL-3.0 授权。
+
+### 第三方依赖
+
+第三方依赖均为 MIT / BSD / Apache 2.0 许可，都可与 GPL-3.0 兼容：
+
+- 课表识别使用 [RapidOCR](https://github.com/RapidAI/RapidOCR)（Apache 2.0）
+- 识别模型为 PaddleOCR 的 `ch_PP-OCRv3`（Apache 2.0）
+- ONNX Runtime（MIT）、Flutter（BSD-3-Clause）
+
+> 之所以选 GPL-**3**.0 而不是 GPL-2.0：Apache 2.0 的专利条款与 GPL-2.0 不兼容，与 GPL-3.0 兼容。
+
+### 如果你想要更严格的
+
+如果担心有人把本项目改造成**在线服务**却不公开源码，可以再升级到 **AGPL-3.0**（把「网络提供服务」也算作分发）。本项目是纯离线应用，通常 GPL-3.0 已经够用。
 
 ---
 
