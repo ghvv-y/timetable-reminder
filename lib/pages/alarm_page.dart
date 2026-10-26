@@ -618,6 +618,22 @@ class _AlarmPageState extends State<AlarmPage> {
       problems.add('还没设置「学期开始日」，所以起止周/单双周过滤不生效，'
           '已上完的课仍会提醒。去设置页填一下学期开始日。');
     }
+    // 下面三项是「闹钟注册了但到点没动静」的常见原因。
+    // 尤其电池优化：国产 ROM 冻结应用后，系统连闹钟都不投递，
+    // 日志里连「闹钟触发」都不会出现 —— 只能靠这里提示用户去放行。
+    if (!health.batteryUnrestricted) {
+      problems.add('电池优化没有放行。系统可能冻结本应用，'
+          '冻结后闹钟**完全不会响**（日志里连「闹钟触发」都没有）。'
+          '请到 系统设置 → 电池/耗电管理 → 课表提醒 → 允许后台高耗电 / 不限制。');
+    }
+    if (!health.exactAlarmAllowed) {
+      problems.add('没有「精确闹钟」权限。提醒仍会响，但可能晚几分钟。'
+          '请到 系统设置 → 应用 → 特殊权限 → 闹钟和提醒 → 允许课表提醒。');
+    }
+    if (health.wantsSms && !health.smsPermission) {
+      problems.add('提醒方式包含短信，但短信权限被拒绝了，'
+          '所以只会弹通知、不会发短信。');
+    }
 
     await showDialog<void>(
       context: context,
@@ -665,6 +681,14 @@ class _AlarmPageState extends State<AlarmPage> {
                         style:
                             const TextStyle(fontSize: 12, height: 1.5),
                       ),
+                      const SizedBox(height: 2),
+                      // 原生侧实际存到的学期开始日：排查「界面设了但原生没收到」
+                      Text(
+                        '原生侧学期开始日：'
+                        '${health.nativeTermStart.isEmpty ? "（空）" : health.nativeTermStart}',
+                        style: const TextStyle(
+                            fontSize: 11, color: Color(0xFF888888)),
+                      ),
                       for (final String p in problems) ...<Widget>[
                         const SizedBox(height: 6),
                         Text(p,
@@ -685,6 +709,30 @@ class _AlarmPageState extends State<AlarmPage> {
                           child: const Text('重新激活闹钟'),
                         ),
                       ],
+                      // 一分钟测试闹钟：判断「系统到底会不会在到点叫醒应用」。
+                      // 测试通知是立刻执行的，证明不了这件事。
+                      const SizedBox(height: 8),
+                      OutlinedButton(
+                        onPressed: () async {
+                          final int at = await AlarmScheduler
+                              .scheduleTestAlarm(delaySeconds: 60);
+                          if (!mounted) return;
+                          if (at <= 0) {
+                            _toast(context, '注册测试闹钟失败，请重试');
+                            return;
+                          }
+                          final DateTime t =
+                              DateTime.fromMillisecondsSinceEpoch(at);
+                          _toast(
+                              context,
+                              '已排一条 ${t.hour.toString().padLeft(2, '0')}:'
+                              '${t.minute.toString().padLeft(2, '0')} 的测试闹钟，'
+                              '一分钟后再打开这里看日志：'
+                              '出现「闹钟触发」= 系统投递正常，'
+                              '什么都没有 = 系统在拦闹钟，要去放行电池优化。');
+                        },
+                        child: const Text('1 分钟后测试闹钟'),
+                      ),
                     ],
                   ),
                 ),

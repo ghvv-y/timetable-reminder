@@ -98,8 +98,25 @@ class MainActivity : FlutterActivity() {
                         val subId = call.argument<Int>("subscriptionId") ?: -1
                         val mode = call.argument<String>("mode")
                             ?: AlarmStore.MODE_BOTH
-                        AlarmScheduler.rescheduleAll(this, array, to, subId, mode)
+                        // 【踩过的坑】这两个参数必须显式取出来传下去。
+                        // 之前只传了前 5 个，termStart 和 weekOverride 用了
+                        // 函数默认值（""/0），于是：
+                        //   · 原生侧永远算不出「今天第几周」→ 自检显示「当前第 ? 周」
+                        //   · 起止周 / 单双周过滤完全失效（上完的课还在提醒）
+                        //   · 界面上「还没设置学期开始日」的警告永远消不掉
+                        // 教训：给函数加带默认值的参数后，所有调用点都要检查，
+                        // 否则默认值会**静默**吞掉新字段。
+                        val termStart = call.argument<String>("termStart") ?: ""
+                        val weekOverride = call.argument<Int>("weekOverride") ?: 0
+                        AlarmScheduler.rescheduleAll(
+                            this, array, to, subId, mode, termStart, weekOverride
+                        )
                         result.success(null)
+                    }
+                    // 注册一条 N 秒后触发的测试闹钟（判断系统会不会投递闹钟）
+                    "scheduleTestAlarm" -> {
+                        val delay = call.argument<Int>("delaySeconds") ?: 60
+                        result.success(AlarmScheduler.scheduleTestAlarm(this, delay))
                     }
                     // 闹钟诊断日志（没收到短信时用）
                     "readDiag" -> result.success(Diag.read(this))
@@ -642,6 +659,55 @@ object AlarmScheduler {
     }
 
     /**
+     * 注册一条「N 秒后触发」的测试闹钟（排查「闹钟到点不响」用）。
+     *
+     * 为什么需要：界面上已经有「测试通知」和「测试短信」，但它们都是
+     * **立刻**执行的 —— 只能证明通知/短信通道通，证明不了系统会不会
+     * 在**到点时**把我们的闹钟叫醒。
+     *
+     * 实测遇到的情况：闹钟注册成功（自检显示 N/N 条都在），但到点
+     * 日志里连「闹钟触发」都没有 —— 那是系统根本不投递。这个按钮
+     * 一分钟就有结论：
+     *   · 日志出现「闹钟触发：__test__」 → 系统投递正常，问题在别处
+     *   · 一分钟过去什么都没有            → 系统在拦闹钟，去放行电池优化
+     *
+     * 测试闹钟会真的写进配置（放进 AlarmStore.all），这样接收器到点
+     * 能按 id 找到它；它是一次性的，触发后会自己从配置里移除。
+     */
+    fun scheduleTestAlarm(context: Context, delaySeconds: Int): Long {
+        val delay = delaySeconds.coerceIn(10, 600)
+        val target = Calendar.getInstance(TimeZone.getDefault())
+        target.add(Calendar.SECOND, delay)
+
+        val alarm = JSONObject().apply {
+            put("id", "__test__")
+            put("timeMinute", target.get(Calendar.HOUR_OF_DAY) * 60 +
+                    target.get(Calendar.MINUTE))
+            put("message", "测试闹钟已触发（如果收到说明系统投递正常）")
+            put("repeatType", "once")
+            put("isCourse", false)
+        }
+
+        // 写进配置，让接收器到点能按 id 找到
+        val arr = JSONArray()
+        for (a in AlarmStore.all(context)) {
+            if (a.optString("id") != "__test__") arr.put(a)
+        }
+        arr.put(alarm)
+        AlarmStore.save(
+            context, arr.toString(), AlarmStore.smsTo(context),
+            AlarmStore.subscriptionId(context), AlarmStore.mode(context),
+            AlarmStore.termStart(context), AlarmStore.weekOverride(context)
+        )
+
+        // 精确到秒地排一条（nextTrigger 只精确到分钟，这里直接排）
+        val runAt = target.timeInMillis
+        scheduleAt(context, alarm, runAt)
+        Diag.log(context, "已注册测试闹钟：${delay} 秒后触发（runAt=${runAt}）")
+        return runAt
+    }
+
+    /**
      * 闹钟健康自检。
      *
      * 为什么需要：
@@ -675,13 +741,42 @@ object AlarmScheduler {
                 as android.app.NotificationManager
         val notifEnabled = nm.areNotificationsEnabled()
 
+        // 精确闹钟权限（Android 12+）。没有它 setExact* 会抛异常，
+        // 只能降级成非精确闹钟，到点时间可能偏几分钟。
+        val exactOk = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            am.canScheduleExactAlarms()
+        } else {
+            true
+        }
+
+        // 电池优化是否已放行。
+        // 国产 ROM（vivo/小米/OPPO）冻结应用的直接后果就是「闹钟不投递」，
+        // 而且日志里连「闹钟触发」都不会出现 —— 用户完全无从判断。
+        val batteryOk = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+            val pm = context.getSystemService(Context.POWER_SERVICE)
+                    as android.os.PowerManager
+            pm.isIgnoringBatteryOptimizations(context.packageName)
+        } else {
+            true
+        }
+
+        // 短信权限（只在提醒方式包含短信时才重要）
+        val smsOk = ContextCompat.checkSelfPermission(
+            context, android.Manifest.permission.SEND_SMS
+        ) == android.content.pm.PackageManager.PERMISSION_GRANTED
+
         return mapOf(
             "configured" to configured.size,
             "alive" to alive,
             "nextTrigger" to next,
             "week" to (currentWeekForFilter(context) ?: -1),
             "notifEnabled" to notifEnabled,
-            "mode" to AlarmStore.mode(context)
+            "mode" to AlarmStore.mode(context),
+            "exactAlarmAllowed" to exactOk,
+            "batteryUnrestricted" to batteryOk,
+            "smsPermission" to smsOk,
+            // 把原生侧真正存到的学期开始日回传，排查「界面设了但没生效」
+            "termStart" to AlarmStore.termStart(context)
         )
     }
 

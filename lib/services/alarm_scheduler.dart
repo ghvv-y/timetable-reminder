@@ -53,6 +53,21 @@ class AlarmHealth {
   /// 当前提醒方式（both / notify / sms）
   final String mode;
 
+  /// 是否有精确闹钟权限（Android 12+ 需要；没有会影响准时）
+  final bool exactAlarmAllowed;
+
+  /// 是否已放行电池优化（false = 系统可能冻结应用，闹钟不响）
+  ///
+  /// 国产 ROM 上这是「闹钟到点不响」最常见的原因：
+  /// 应用被冻结后，连系统闹钟都不投递，日志里连「闹钟触发」都没有。
+  final bool batteryUnrestricted;
+
+  /// 是否已授予短信权限
+  final bool smsPermission;
+
+  /// 原生侧实际存到的学期开始日（排查「设置了但没生效」用）
+  final String nativeTermStart;
+
   const AlarmHealth({
     required this.configured,
     required this.alive,
@@ -60,6 +75,10 @@ class AlarmHealth {
     required this.week,
     this.notifEnabled = true,
     this.mode = 'both',
+    this.exactAlarmAllowed = true,
+    this.batteryUnrestricted = true,
+    this.smsPermission = true,
+    this.nativeTermStart = '',
   });
 
   /// 系统里的闹钟是不是被清掉了
@@ -72,6 +91,9 @@ class AlarmHealth {
 
   /// 提醒方式是否包含通知
   bool get wantsNotify => mode != 'sms';
+
+  /// 提醒方式是否包含短信
+  bool get wantsSms => mode != 'notify';
 }
 
 class AlarmScheduler {
@@ -158,6 +180,27 @@ class AlarmScheduler {
     } catch (_) {}
   }
 
+  /// 注册一条 [delaySeconds] 秒后触发的测试闹钟。
+  ///
+  /// 与「测试通知」的区别：测试通知是**立刻**执行，只能证明通知通道通；
+  /// 这个才真正走一次 AlarmManager —— 用来判断「系统到底会不会在到点时
+  /// 把应用叫醒」。如果一分钟过去日志里没有「闹钟触发」，说明系统在拦闹钟，
+  /// 需要去放行电池优化 / 自启动。
+  ///
+  /// 返回触发时间戳（毫秒），失败返回 -1。
+  static Future<int> scheduleTestAlarm({int delaySeconds = 60}) async {
+    if (!isSupported) return -1;
+    try {
+      final int? r = await _channel.invokeMethod<int>(
+        'scheduleTestAlarm',
+        <String, Object>{'delaySeconds': delaySeconds},
+      );
+      return r ?? -1;
+    } catch (_) {
+      return -1;
+    }
+  }
+
   /// 闹钟健康自检
   ///
   /// 实测出现过「刚装好能响，过一两天就再也不响，日志里连触发都没有」——
@@ -178,6 +221,10 @@ class AlarmScheduler {
           week: (r['week'] as num?)?.toInt() ?? -1,
           notifEnabled: r['notifEnabled'] != false,
           mode: (r['mode'] ?? 'both').toString(),
+          exactAlarmAllowed: r['exactAlarmAllowed'] != false,
+          batteryUnrestricted: r['batteryUnrestricted'] != false,
+          smsPermission: r['smsPermission'] != false,
+          nativeTermStart: (r['termStart'] ?? '').toString(),
         );
       }
     } catch (_) {}
