@@ -15,6 +15,7 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
 import '../model/models.dart';
+import '../widgets/week_bar.dart';
 import '../model/period_time.dart';
 import '../services/app_state.dart';
 import '../services/file_gateway.dart';
@@ -246,52 +247,18 @@ class _SchedulePageState extends State<SchedulePage> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: <Widget>[
-          Row(
-            children: <Widget>[
-              const Text('第',
-                  style: TextStyle(fontSize: 14, color: Color(0xFF666666))),
-              const SizedBox(width: 6),
-              Text('${state.activeWeek}',
-                  style: const TextStyle(
-                      fontSize: 20, fontWeight: FontWeight.w600)),
-              const SizedBox(width: 6),
-              Text('周 / 共 $totalWeeks 周',
-                  style:
-                      const TextStyle(fontSize: 14, color: Color(0xFF666666))),
-              const SizedBox(width: 8),
-              // 当前周次的日期区间，一眼看出算得对不对
-              if (state.settings.termStart.isNotEmpty)
-                Text(
-                  weekRangeText(state.settings.termStart, state.activeWeek),
-                  style: const TextStyle(
-                      fontSize: 11.5, color: Color(0xFF999999)),
-                ),
-              const Spacer(),
-              // 看了别的周之后，一键回到当前真实周次
-              if (state.activeWeek != (state.autoWeek ?? state.activeWeek))
-                TextButton(
-                  onPressed: state.jumpToCurrentWeek,
-                  style: TextButton.styleFrom(
-                    padding: const EdgeInsets.symmetric(horizontal: 8),
-                    minimumSize: const Size(0, 32),
-                  ),
-                  child: const Text('回到本周', style: TextStyle(fontSize: 12)),
-                ),
-              IconButton(
-                tooltip: '上一周',
-                onPressed: state.activeWeek > 1
-                    ? () => state.setActiveWeek(state.activeWeek - 1)
-                    : null,
-                icon: const Icon(Icons.chevron_left),
-              ),
-              IconButton(
-                tooltip: '下一周',
-                onPressed: state.activeWeek < totalWeeks
-                    ? () => state.setActiveWeek(state.activeWeek + 1)
-                    : null,
-                icon: const Icon(Icons.chevron_right),
-              ),
-            ],
+          WeekBar(
+            activeWeek: state.activeWeek,
+            autoWeek: state.autoWeek,
+            totalWeeks: totalWeeks,
+            termStart: state.settings.termStart,
+            onPrev: state.activeWeek > 1
+                ? () => state.setActiveWeek(state.activeWeek - 1)
+                : null,
+            onNext: state.activeWeek < totalWeeks
+                ? () => state.setActiveWeek(state.activeWeek + 1)
+                : null,
+            onBackToCurrent: state.jumpToCurrentWeek,
           ),
 
           // ---- 第二行：操作按钮 ----
