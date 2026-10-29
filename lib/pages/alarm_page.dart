@@ -23,6 +23,7 @@ import '../model/models.dart';
 import '../services/alarm_scheduler.dart';
 import '../services/app_state.dart';
 import '../utils/time_utils.dart';
+import '../utils/validators.dart';
 
 class AlarmPage extends StatefulWidget {
   const AlarmPage({super.key});
@@ -509,6 +510,13 @@ class _AlarmPageState extends State<AlarmPage> {
                         Expanded(
                           child: FilledButton(
                             onPressed: () async {
+                              // 按星期的闹钟必须至少选一天，否则永远算不出
+                              // 触发时刻 —— 界面看着是启用的，到点却一声不响。
+                              if (!isValidAlarmWeekdays(
+                                  repeatType, weekdays.toList())) {
+                                _toast(context, '请至少选择一个星期，否则这个闹钟永远不会响');
+                                return;
+                              }
                               final int minute = time.hour * 60 + time.minute;
                               final Alarm value = Alarm(
                                 id: origin?.id ??

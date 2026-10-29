@@ -24,6 +24,7 @@ import '../services/sms_sender.dart';
 import '../utils/time_utils.dart';
 import 'build_stamp_card.dart';
 import 'permission_check_card.dart';
+import '../utils/validators.dart';
 
 class SettingsPage extends StatefulWidget {
   const SettingsPage({super.key});
@@ -142,6 +143,25 @@ class _SettingsPageState extends State<SettingsPage> {
                 ],
               ),
             ),
+            // 短信总开关关闭时，选「通知+短信」「仅短信」都会被自动降级 ——
+            // 必须说清楚，否则用户会以为选了短信却收不到。
+            if (!state.settings.smsEnabled) ...<Widget>[
+              const SizedBox(height: 8),
+              Container(
+                width: double.infinity,
+                padding: const EdgeInsets.all(10),
+                decoration: BoxDecoration(
+                  color: const Color(0xFFFFF7E6),
+                  borderRadius: BorderRadius.circular(8),
+                  border: Border.all(color: const Color(0xFFFFE2A8)),
+                ),
+                child: const Text(
+                  '「启用短信提醒」已关闭，所以无论这里选哪一项，'
+                  '到点都只会弹通知、不会发短信。',
+                  style: TextStyle(fontSize: 12, height: 1.6),
+                ),
+              ),
+            ],
           ],
         ),
 
@@ -1002,14 +1022,22 @@ class _SettingsPageState extends State<SettingsPage> {
       initialTime: TimeOfDay(
           hour: pt.endMinute ~/ 60, minute: pt.endMinute % 60),
     );
-    if (e == null) return;
+    if (e == null || !context.mounted) return;
+
+    final int startMinute = s.hour * 60 + s.minute;
+    final int endMinute = e.hour * 60 + e.minute;
+    // 作息必须「结束晚于开始」，否则下课提醒会早于上课提醒
+    if (!isValidPeriodRange(startMinute, endMinute)) {
+      _toast(context, '结束时间必须晚于开始时间，已取消本次修改');
+      return;
+    }
 
     final List<PeriodTime> list = state.periodTimes
         .map((PeriodTime p) => p.period == pt.period
             ? PeriodTime(
                 period: pt.period,
-                startMinute: s.hour * 60 + s.minute,
-                endMinute: e.hour * 60 + e.minute,
+                startMinute: startMinute,
+                endMinute: endMinute,
               )
             : p)
         .toList();
@@ -1026,6 +1054,9 @@ class _SettingsPageState extends State<SettingsPage> {
     list.add(PeriodTime(
         period: next, startMinute: 8 * 60, endMinute: 8 * 60 + 45));
     await state.setPeriodTimes(list);
+    // 新增节次后必须重建提醒：之前因「查不到该节次作息」而没生成闹钟的课程，
+    // 现在能生成了。只 setPeriodTimes 的话它们仍然没有提醒。
+    await state.regenerateCourseAlarms();
   }
 
   static void _toast(BuildContext context, String text) {

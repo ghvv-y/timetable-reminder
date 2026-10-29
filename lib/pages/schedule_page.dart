@@ -20,6 +20,7 @@ import '../model/period_time.dart';
 import '../services/app_state.dart';
 import '../services/file_gateway.dart';
 import '../utils/time_utils.dart';
+import '../utils/validators.dart';
 
 class SchedulePage extends StatefulWidget {
   const SchedulePage({super.key});
@@ -835,8 +836,11 @@ class _SchedulePageState extends State<SchedulePage> {
                                 child: Text('到第${i + 1}节'),
                               ),
                             ),
-                            onChanged: (int? v) => setLocal(
-                                () => endPeriod = v ?? endPeriod),
+                            onChanged: (int? v) => setLocal(() {
+                              // 结束节次不能小于开始节次（否则课程块算出负高度）
+                              endPeriod =
+                                  clampEndPeriod(startPeriod, v ?? endPeriod);
+                            }),
                           ),
                         ),
                       ],

@@ -33,6 +33,7 @@ import '../ocr/text_recognizer.dart';
 import '../services/app_state.dart';
 import '../services/screen_capture.dart';
 import '../utils/time_utils.dart';
+import '../utils/validators.dart';
 
 class OcrPage extends StatefulWidget {
   const OcrPage({super.key});
@@ -965,8 +966,11 @@ class _OcrPageState extends State<OcrPage> {
                                 child: Text('到第${i + 1}节'),
                               ),
                             ),
-                            onChanged: (int? v) =>
-                                setLocal(() => end = v ?? end),
+                            onChanged: (int? v) => setLocal(() {
+                              // 结束节次不能小于开始节次：课表页按区间算
+                              // 课程块高度，倒置会算出负高度导致布局异常
+                              end = clampEndPeriod(start, v ?? end);
+                            }),
                           ),
                         ),
                       ],

@@ -415,6 +415,22 @@ class AppSettings {
   /// 是否处于手动指定周次模式
   bool get usesManualWeek => weekOverride > 0;
 
+  /// 实际生效的提醒方式（both / notify / sms）
+  ///
+  /// [smsEnabled] 是短信的**总开关**：设置页上写的是「关闭后所有闹钟都不发送短信」。
+  /// 但早先调度只读 [reminderMode]，这个开关根本没被任何逻辑读取 ——
+  /// 用户关掉短信后，闹钟到点照样发短信、照样可能产生费用。
+  ///
+  /// 现在统一在这里收敛：
+  ///   · 开关打开 → 用用户选的模式
+  ///   · 开关关闭 → 一律退化为「仅通知」，绝不再发短信。
+  ///     选「仅短信」时也退化为通知，否则用户会一条提醒都收不到。
+  String get effectiveReminderMode =>
+      smsEnabled ? reminderMode : 'notify';
+
+  /// 当前配置是否真的会发短信（界面提示用）
+  bool get willSendSms => effectiveReminderMode != 'notify';
+
   Map<String, Object?> toJson() => {
         'smsTo': smsTo,
         'smsSubscriptionId': smsSubscriptionId,

@@ -20,6 +20,7 @@
 // 纯函数、无副作用、不依赖平台，可直接单元测试。
 
 import '../model/models.dart';
+import 'paste_parser.dart';
 import '../model/period_time.dart';
 
 /// 一个格子的原始内容
@@ -159,6 +160,14 @@ class ParsedCell {
   String name = '';
   String teacher = '';
   String room = '';
+
+  /// 周次集合（可能有多段，如「3-4,6-10周」）
+  ///
+  /// 早先只保留「起始周 + 结束周」，不连续的区间会被塌成一段连续，
+  /// 结果是中间没课的那几周也会发提醒。现在保留全部区间，
+  /// 由 parseSchedule 展开成多条课程记录。
+  List<WeekSpec> weeks = <WeekSpec>[];
+
   int startWeek = 1;
   int endWeek = 16;
   int? startPeriod;
@@ -169,7 +178,7 @@ class ParsedCell {
   @override
   String toString() =>
       'name=$name teacher=$teacher room=$room '
-      'period=$startPeriod-$endPeriod week=$startWeek-$endWeek';
+      'period=$startPeriod-$endPeriod week=$weeks';
 }
 
 /// 解析一个格子的文字行
@@ -200,25 +209,24 @@ ParsedCell? parseCell(List<String> lines, int periodHint) {
       continue;
     }
 
-    // 周次区间
-    m = reWeekRange.firstMatch(t);
-    if (m != null) {
-      final int a = int.parse(m.group(1)!);
-      final int b = int.parse(m.group(2)!);
-      sw = a < b ? a : b;
-      ew = a < b ? b : a;
-      continue;
-    }
-
-    // 单个周次（「第7周」这种）
-    m = reWeekOne.firstMatch(t);
-    if (m != null && !t.contains('节') && t.length <= 6) {
-      final int n = int.parse(m.group(1)!);
-      if (n >= 1 && n <= 30) {
-        sw = n;
-        ew = n;
+    // 周次：可能是「3-16周」「3-4,6-10周」「第7周」「3,5,7,9周」等
+    //
+    // 【踩过的坑 1】早先用 firstMatch 只取一段：「3-4,6-10周」会**丢掉一整段**，
+    // 结果是那几周的课完全没有提醒。现在统一交给 parseWeekExpr，
+    // 它支持多段拆分、单双周列表，和粘贴导入用的是同一套规则。
+    //
+    // 【踩过的坑 2】必须要求文字里带「周」字。曾经为了兼容 OCR 掉字，
+    // 放宽成「纯数字也当周次」，结果课程编号后半段（「形势与政策_29」
+    // 里的 29）被当成第 29 周，整门课被拆错。
+    // 结论：宁可漏识别，也不能把编号误判成周次。
+    if (t.contains('周')) {
+      final List<WeekSpec> ws = parseWeekExpr(t);
+      if (ws.isNotEmpty) {
+        out.weeks.addAll(ws);
+        sw = ws.map((WeekSpec w) => w.startWeek).reduce((int a, int b) => a < b ? a : b);
+        ew = ws.map((WeekSpec w) => w.endWeek).reduce((int a, int b) => a > b ? a : b);
+        continue;
       }
-      continue;
     }
 
     // 单个节次
@@ -271,6 +279,10 @@ ParsedCell? parseCell(List<String> lines, int periodHint) {
   out.endWeek = ew;
   out.startPeriod = sp ?? periodHint;
   out.endPeriod = ep ?? periodHint;
+  // 一个字都没提到周次时，用整学期兜底（保持和调用方一致的默认值）
+  if (out.weeks.isEmpty) {
+    out.weeks = <WeekSpec>[WeekSpec(out.startWeek, out.endWeek, 'all')];
+  }
   return out;
 }
 
@@ -319,11 +331,13 @@ class _Building {
   int weekday = 1;
   int startPeriod = 1;
   int endPeriod = 1;
-  int startWeek = 1;
-  int endWeek = 16;
+
+  /// 周次集合；空表示「还没解析到周次」
+  List<WeekSpec> weeks = <WeekSpec>[];
+
   bool explicitPeriod = false;
 
-  bool defaultWeeks() => startWeek == 1 && endWeek == 16;
+  bool defaultWeeks() => weeks.isEmpty;
 }
 
 /// 把格子转成课程 + 作息时间。
@@ -378,7 +392,11 @@ CellParseResult parseSchedule(List<OcrCell> cells) {
     final List<OcrCell> colCells =
         cells.where((OcrCell c) => c.col == col).toList()
           ..sort((OcrCell a, OcrCell b) => a.row.compareTo(b.row));
-    _Building? current;
+
+    // 【踩过的坑】这里早先是单个 `current` 变量，压缩格拆出的两个子槽
+    // 会互相覆盖：第一门课的教室/教师可能被补到第二门课上。
+    // 现在按子槽（part.offset）分别跟踪。
+    final List<_Building?> currentBySlot = <_Building?>[null, null];
 
     for (final OcrCell cell in colCells) {
       final int? period = row2period[cell.row];
@@ -395,8 +413,9 @@ CellParseResult parseSchedule(List<OcrCell> cells) {
         if (wd > 7) wd = 7;
 
         final ParsedCell? info = parseCell(part.lines, period);
+        final _Building? current = currentBySlot[part.offset];
 
-        // 无课名 = 本门课的续行（只有教室/教师），并入上一门
+        // 无课名 = 本门课的续行（只有教室/教师），并入同子槽的上一门
         if (info == null || !info.hasName) {
           if (current != null && info != null) {
             if (current.room.isEmpty && info.room.isNotEmpty) {
@@ -405,9 +424,8 @@ CellParseResult parseSchedule(List<OcrCell> cells) {
             if (current.teacher.isEmpty && info.teacher.isNotEmpty) {
               current.teacher = info.teacher;
             }
-            if (!(info.startWeek == 1 && info.endWeek == 16)) {
-              current.startWeek = info.startWeek;
-              current.endWeek = info.endWeek;
+            if (current.defaultWeeks() && info.weeks.isNotEmpty) {
+              current.weeks = List<WeekSpec>.from(info.weeks);
             }
             // 续行里明写节次（如「7-8节」）时用它修正
             final Match? pm = rePeriodRange.firstMatch(part.lines.join(' '));
@@ -437,10 +455,8 @@ CellParseResult parseSchedule(List<OcrCell> cells) {
           if (current.teacher.isEmpty && info.teacher.isNotEmpty) {
             current.teacher = info.teacher;
           }
-          if (current.defaultWeeks() &&
-              !(info.startWeek == 1 && info.endWeek == 16)) {
-            current.startWeek = info.startWeek;
-            current.endWeek = info.endWeek;
+          if (current.defaultWeeks() && info.weeks.isNotEmpty) {
+            current.weeks = List<WeekSpec>.from(info.weeks);
           }
           if (!current.explicitPeriod && period > current.endPeriod) {
             current.endPeriod = period;
@@ -451,8 +467,7 @@ CellParseResult parseSchedule(List<OcrCell> cells) {
             ..teacher = info.teacher
             ..room = info.room
             ..weekday = wd
-            ..startWeek = info.startWeek
-            ..endWeek = info.endWeek
+            ..weeks = List<WeekSpec>.from(info.weeks)
             ..explicitPeriod =
                 rePeriodRange.hasMatch(part.lines.join(' '));
           int sp = info.startPeriod ?? period;
@@ -465,15 +480,22 @@ CellParseResult parseSchedule(List<OcrCell> cells) {
           b.startPeriod = sp;
           b.endPeriod = ep;
           builders.add(b);
-          current = b;
+          currentBySlot[part.offset] = b;
         }
       }
     }
   }
 
-  // 到这里所有「续行补充」都已完成，再统一生成 Course
+  // 到这里所有「续行补充」都已完成，再统一生成 Course。
+  // 一个构造对象可能展开成多条课程：不连续周次（3-4,6-10周）必须拆开，
+  // 否则中间没课的周也会发提醒。
   for (final _Building b in builders) {
-    result.add(_toCourse(b, seq++));
+    final List<WeekSpec> use = b.weeks.isEmpty
+        ? <WeekSpec>[const WeekSpec(1, 16, 'all')]
+        : b.weeks;
+    for (final WeekSpec w in use) {
+      result.add(_toCourse(b, seq++, w));
+    }
   }
 
   // 过滤噪声：只有地点/教师没有课名的碎片
@@ -495,7 +517,7 @@ CellParseResult parseSchedule(List<OcrCell> cells) {
   );
 }
 
-Course _toCourse(_Building b, int seq) {
+Course _toCourse(_Building b, int seq, WeekSpec week) {
   final String roomFixed = b.room.trim();
   final String teacherFixed = b.teacher.trim();
   return Course(
@@ -506,8 +528,8 @@ Course _toCourse(_Building b, int seq) {
     endPeriod: b.endPeriod,
     room: roomFixed,
     teacher: teacherFixed,
-    startWeek: b.startWeek,
-    endWeek: b.endWeek,
-    weekType: 'all',
+    startWeek: week.startWeek,
+    endWeek: week.endWeek,
+    weekType: week.weekType,
   );
 }

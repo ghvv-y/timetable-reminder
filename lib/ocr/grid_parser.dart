@@ -47,7 +47,6 @@ final RegExp _reTime = RegExp(
 final RegExp _reRoomLike = RegExp(r'[A-Za-z]\d{2,}|\d+-\d+');
 final RegExp _reCjkTeacher = RegExp(r'^[\u4e00-\u9fa5]{2,4}$');
 final RegExp _reHasDigit = RegExp(r'\d');
-final RegExp _rePureDigits = RegExp(r'^[\d,\-]+$');
 
 bool _looksLikePlace(String t) {
   if (_placeHints.any(t.contains)) return true;
@@ -91,8 +90,13 @@ SlotFields parseSlotLines(List<String> lines) {
       }
     }
 
-    // 周次（含裸数字串，OCR 常把逗号吃掉）
-    if (t.contains('周') || _rePureDigits.hasMatch(t)) {
+    // 周次：必须带「周」字。
+    //
+    // 曾经想连「裸数字串」也当周次（兼容 OCR 把逗号吃掉的情况，
+    // 如 3,5,7 → 357），但课程编号的后半段本身就是裸数字
+    // （「形势与政策_29」里的 29），会被误判成第 29 周，
+    // 整门课拆错。宁可漏识别也不能这样误判。
+    if (t.contains('周')) {
       final List<WeekSpec> w = parseWeekExpr(t, warnings: f.warnings);
       if (w.isNotEmpty) {
         f.weeks.addAll(w);
@@ -233,6 +237,10 @@ GridParseResult parseGridJson(String json) {
         } else if (curBySlot[slot] != null) {
           final _Building cur = curBySlot[slot]!;
           if (cur.room.isEmpty && f.room.isNotEmpty) cur.room = f.room;
+          // 教师也可能被 OCR 挤到下一行（课名一行、教师一行），必须一起补
+          if (cur.teacher.isEmpty && f.teacher.isNotEmpty) {
+            cur.teacher = f.teacher;
+          }
           if (cur.weeks.isEmpty && f.weeks.isNotEmpty) {
             cur.weeks = List<WeekSpec>.from(f.weeks);
           }

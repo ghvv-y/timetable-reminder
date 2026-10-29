@@ -191,5 +191,86 @@ void main() {
             (p.weekday == q.weekday && p.startPeriod <= q.startPeriod), isTrue);
       }
     });
+
+    test('压缩格两门课的续行不会串到另一门上', () {
+      // 回归点：早先两个子槽共用一个 current 变量，
+      // 第二门课会把第一门课的教室覆盖/抢占。
+      final CellParseResult r = parseSchedule(sampleCells());
+      final Course a = r.courses
+          .firstWhere((Course c) => c.name.contains('形势与政策'));
+      final Course b =
+          r.courses.firstWhere((Course c) => c.name.contains('专业导论'));
+      expect(a.room, contains('A204'), reason: '第 1 门应拿到自己的 A204');
+      expect(b.room, contains('A304'), reason: '第 2 门应拿到自己的 A304');
+      expect(a.room, isNot(contains('A304')));
+      expect(b.room, isNot(contains('A204')));
+    });
+  });
+
+  group('周次区间', () {
+    /// 造一份最小网格：时间栏 + 一格课程
+    List<OcrCell> oneCourse(List<String> lines) => <OcrCell>[
+          const OcrCell(row: 0, col: 0, lines: <String>['第(08:00-08:45)']),
+          OcrCell(row: 0, col: 1, lines: lines),
+        ];
+
+    test('连续周次是一门课', () {
+      final CellParseResult r =
+          parseSchedule(oneCourse(<String>['工程图学B（1）_03', '李帅*', '3-10周', '3-4节']));
+      final List<Course> gd =
+          r.courses.where((Course c) => c.name.contains('工程图学')).toList();
+      expect(gd.length, 1);
+      expect(gd.first.startWeek, 3);
+      expect(gd.first.endWeek, 10);
+    });
+
+    test('不连续周次拆成两条，而不是塌成一整段', () {
+      // 回归点：早先只取第一个匹配，会丢掉一整段 ——
+      // 结果那几周的课完全没有提醒（或者中间没课的周反而提醒）。
+      final CellParseResult r = parseSchedule(
+          oneCourse(<String>['工程图学B（1）_03', '李帅*', '3-4,6-10周', '3-4节']));
+      final List<Course> gd =
+          r.courses.where((Course c) => c.name.contains('工程图学')).toList();
+      expect(gd.length, 2, reason: '3-4 与 6-10 必须拆成两条');
+      expect(
+        gd.map((Course c) => '${c.startWeek}-${c.endWeek}').toSet(),
+        <String>{'3-4', '6-10'},
+      );
+      // 第 5 周不该有任何一条覆盖
+      for (final Course c in gd) {
+        expect(5 >= c.startWeek && 5 <= c.endWeek, isFalse,
+            reason: '第 5 周本来没课，不能被覆盖');
+      }
+    });
+
+    test('单周列表识别为 odd', () {
+      final CellParseResult r = parseSchedule(
+          oneCourse(<String>['大学英语（1）_33', '黄怡凡*', '3,5,7,9,11,13,15周', '7-8节']));
+      final Course c =
+          r.courses.firstWhere((Course x) => x.name.contains('大学英语'));
+      expect(c.weekType, 'odd');
+      expect(c.startWeek, 3);
+      expect(c.endWeek, 15);
+    });
+
+    test('双周列表识别为 even', () {
+      final CellParseResult r = parseSchedule(
+          oneCourse(<String>['大学英语（1）_33', '黄怡凡*', '4,6,8,10,12,14,16周', '7-8节']));
+      final Course c =
+          r.courses.firstWhere((Course x) => x.name.contains('大学英语'));
+      expect(c.weekType, 'even');
+      expect(c.startWeek, 4);
+      expect(c.endWeek, 16);
+    });
+
+    test('没写周次时按整学期兜底', () {
+      final CellParseResult r =
+          parseSchedule(oneCourse(<String>['形势与政策_29', '孙兴昌*', '7-8节']));
+      final Course c =
+          r.courses.firstWhere((Course x) => x.name.contains('形势与政策'));
+      expect(c.startWeek, 1);
+      expect(c.endWeek, 16);
+      expect(c.weekType, 'all');
+    });
   });
 }

@@ -59,10 +59,30 @@ class Storage {
 
   Future<void> _read() async {
     final File? f = _file;
-    if (f == null || !await f.exists()) return;
+    if (f == null) return;
+
+    // 恢复顺序：正式文件 → .bak → .tmp
+    //
+    // 【踩过的坑】保存流程早先是「写 tmp → 删正式 → tmp 转正」，
+    // 删完到转正之间如果进程被杀，正式文件就没了，而启动时又只读正式文件 ——
+    // 结果课表和闹钟数据全部丢失。现在保存不再先删（见 save()），
+    // 读取这边也补上从 .bak / .tmp 恢复。
+    final File bak = File('${f.path}.bak');
+    final File tmp = File('${f.path}.tmp');
+
+    File? source;
+    if (await f.exists()) {
+      source = f;
+    } else if (await bak.exists()) {
+      source = bak;
+    } else if (await tmp.exists()) {
+      source = tmp;
+    }
+    if (source == null) return;
+
     try {
-      final String raw = await f.readAsString();
-      if (raw.trim().isEmpty) return;
+      final String raw = await source.readAsString();
+      if (raw.trim().isEmpty && source != f) return;
       final Map<String, Object?> data =
           Map<String, Object?>.from(jsonDecode(raw) as Map);
       // 加载时也做清洗：存档可能是旧版本写的、也可能被手工改过。
@@ -71,6 +91,16 @@ class Storage {
       periodTimes = _parsePeriods(_list(data['periods']));
       alarms = _list(data['alarms']).map(Alarm.fromMap).toList();
       logs = _list(data['logs']).map(SmsLog.fromMap).toList();
+
+      // 从备份恢复成功后，把内容写回正式文件，并清掉临时副本，
+      // 避免下次启动又走恢复逻辑
+      if (source != f) {
+        try {
+          await f.writeAsString(raw, flush: true);
+          if (await bak.exists()) await bak.delete();
+          if (await tmp.exists()) await tmp.delete();
+        } catch (_) {}
+      }
     } catch (_) {
       // 数据损坏时不阻塞启动：保留空数据，用户可以重新导入备份
       courses = <Course>[];
@@ -218,26 +248,70 @@ class Storage {
   }
 
   /// 异步落盘
+  ///
+  /// 【踩过的坑】早先是「写 tmp → 删正式文件 → tmp 改名」：
+  /// 删完到改名之间如果进程被杀（或改名失败），正式文件就没了，
+  /// 而且外层 `catch` 会把异常吞掉 —— 数据静默丢失。
+  ///
+  /// 现在改成不删数据的安全顺序：
+  ///   1. 内容完整写进 tmp 并 flush
+  ///   2. 正式文件改名成 .bak（改名不丢内容，比删除安全）
+  ///   3. tmp 转正
+  ///   4. 成功后删掉 .bak
+  /// 任一步失败，磁盘上至少还有 .bak 或 .tmp，启动时由 _read() 恢复。
   void save() {
     final File? f = _file;
     if (f == null) return;
     _writeChain = _writeChain.then((_) async {
+      final File tmp = File('${f.path}.tmp');
+      final File bak = File('${f.path}.bak');
       try {
         final String content = exportJson(pretty: false);
-        final File tmp = File('${f.path}.tmp');
         await tmp.writeAsString(content, flush: true);
-        if (await tmp.exists()) {
-          if (await f.exists()) await f.delete();
-          await tmp.rename(f.path);
+        if (!await tmp.exists()) return;
+
+        // 旧文件先留一份备份，而不是直接删掉
+        if (await f.exists()) {
+          try {
+            if (await bak.exists()) await bak.delete();
+            await f.rename(bak.path);
+          } catch (_) {
+            // 改名失败（比如被占用）：保持原文件不动，本次保存放弃。
+            // 宁可这次没写进去，也不能把已有数据弄丢。
+            return;
+          }
         }
+
+        await tmp.rename(f.path);
+
+        // 转正成功，备份就没用了
+        try {
+          if (await bak.exists()) await bak.delete();
+        } catch (_) {}
       } catch (_) {
-        // 落盘失败不影响内存中的使用，下次变更会再次尝试
+        // 落盘失败不影响内存中的使用，下次变更会再次尝试。
+        // 此时正式文件或备份至少还有一个可用副本。
       }
     });
   }
 
   /// 等待所有落盘完成（退出或测试时使用）
   Future<void> flush() => _writeChain;
+
+  /// 仅供测试：清掉「已加载」标记并清空内存数据，让 init() 重新读盘。
+  ///
+  /// 之所以需要：Storage 是单例，init() 只生效一次（`if (_loaded) return`）。
+  /// 而「保存中断后能否从 .bak / .tmp 恢复」这类测试必须**真的再读一次盘**，
+  /// 否则读到的只是内存里的旧数据，测试会假绿。
+  void debugResetForTest() {
+    _loaded = false;
+    _file = null;
+    _writeChain = Future<void>.value();
+    courses = <Course>[];
+    periodTimes = <PeriodTime>[];
+    alarms = <Alarm>[];
+    logs = <SmsLog>[];
+  }
 
   /// 数据文件路径
   String? get path => _file?.path;

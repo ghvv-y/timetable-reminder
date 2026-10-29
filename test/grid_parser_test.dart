@@ -176,5 +176,41 @@ void main() {
       expect(e.courses, isEmpty);
       expect(e.periods, isEmpty);
     });
+
+    test('教师被 OCR 挤到下一行时不会丢失', () {
+      // 回归点：续行分支早先只补 room / weeks / periods，漏了 teacher，
+      // 「课名一行、教师一行」的版式会把教师静默丢掉。
+      //
+      // 结构：grid[行][天][子槽] = 文字行；本例只有一天（days = [1]）
+      final List<List<List<List<String>>>> grid =
+          <List<List<List<String>>>>[
+        // 第 1 行：课名 + 周次
+        <List<List<String>>>[
+          <List<String>>[
+            <String>['大学英语（1）_33', '7-8周'],
+            <String>[],
+          ],
+        ],
+        // 第 2 行：教师 + 教室（续行）
+        <List<List<String>>>[
+          <List<String>>[
+            <String>['黄怡凡*', '校本部冷链大楼冷链-A202'],
+            <String>[],
+          ],
+        ],
+      ];
+
+      final GridParseResult parsed = parseGridJson(jsonEncode(<String, Object?>{
+        'rows': <String>['08:00-08:45', '08:50-09:35'],
+        'days': <int>[1],
+        'grid': grid,
+      }));
+
+      expect(parsed.courses, isNotEmpty);
+      final Course c = parsed.courses.first;
+      expect(c.name, contains('大学英语'));
+      expect(c.teacher, contains('黄怡凡'), reason: '教师写在下一行时也必须补进来');
+      expect(c.room, contains('A202'));
+    });
   });
 }

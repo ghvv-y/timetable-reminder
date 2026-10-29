@@ -450,7 +450,9 @@ class AppState extends ChangeNotifier {
       alarms: payload,
       smsTo: settings.smsTo,
       subscriptionId: settings.smsSubscriptionId,
-      mode: settings.reminderMode,
+      // 用「实际生效」的模式，而不是用户选的模式：
+      // 短信总开关关闭时必须降级为仅通知，否则关了还会发短信。
+      mode: settings.effectiveReminderMode,
       // 原生侧要靠它算出"今天第几周"
       termStart: settings.termStart,
       weekOverride: settings.weekOverride,

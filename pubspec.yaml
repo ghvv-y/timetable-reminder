@@ -1,7 +1,7 @@
 name: timetable_app
 description: 极简课表提醒 App —— 识别课表截图（含边侧作息时间），到点静默发送短信，由华为手表完成提醒。
 publish_to: "none"
-version: 0.12.2+32
+version: 0.13.0+33
 
 environment:
   sdk: ">=3.3.0 <4.0.0"
