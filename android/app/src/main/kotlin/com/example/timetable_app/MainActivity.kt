@@ -775,6 +775,10 @@ object AlarmScheduler {
             "exactAlarmAllowed" to exactOk,
             "batteryUnrestricted" to batteryOk,
             "smsPermission" to smsOk,
+            // 通知渠道状态：渠道被调低/关闭时手机上根本不显示，
+            // 手表自然也收不到 —— 这类问题原来完全看不出来
+            "channelImportance" to ReminderNotifier.channelImportance(context),
+            "channelBlocked" to ReminderNotifier.channelBlocked(context),
             // 把原生侧真正存到的学期开始日回传，排查「界面设了但没生效」
             "termStart" to AlarmStore.termStart(context)
         )

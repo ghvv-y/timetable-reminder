@@ -68,6 +68,15 @@ class AlarmHealth {
   /// 原生侧实际存到的学期开始日（排查「设置了但没生效」用）
   final String nativeTermStart;
 
+  /// 通知渠道的重要性等级（Android 8+）：0=NONE 2=LOW 3=DEFAULT 4=HIGH；-1=无渠道概念
+  final int channelImportance;
+
+  /// 通知渠道是否被关掉（importance == NONE）
+  ///
+  /// 关掉之后手机上完全不显示这条通知 —— 手表自然也收不到。
+  /// 这个开关在系统设置里很容易被误关，必须显式报出来。
+  final bool channelBlocked;
+
   const AlarmHealth({
     required this.configured,
     required this.alive,
@@ -79,6 +88,8 @@ class AlarmHealth {
     this.batteryUnrestricted = true,
     this.smsPermission = true,
     this.nativeTermStart = '',
+    this.channelImportance = -1,
+    this.channelBlocked = false,
   });
 
   /// 系统里的闹钟是不是被清掉了
@@ -225,6 +236,8 @@ class AlarmScheduler {
           batteryUnrestricted: r['batteryUnrestricted'] != false,
           smsPermission: r['smsPermission'] != false,
           nativeTermStart: (r['termStart'] ?? '').toString(),
+          channelImportance: (r['channelImportance'] as num?)?.toInt() ?? -1,
+          channelBlocked: r['channelBlocked'] == true,
         );
       }
     } catch (_) {}

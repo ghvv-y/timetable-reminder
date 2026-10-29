@@ -35,37 +35,74 @@ import androidx.core.app.NotificationCompat
  */
 object ReminderNotifier {
 
-    const val CHANNEL_ID = "class_reminder"
+    /**
+     * 通知渠道 id。
+     *
+     * 【为什么带 _v2】Android 规定**渠道建好之后重要性不能由应用改高**
+     * （只能由用户在系统设置里改）。老版本用 IMPORTANCE_DEFAULT 建的
+     * `class_reminder` 已经存在了，改动量级对它无效 ——
+     * 必须换新 id 才能让新等级生效。旧渠道会在 ensureChannel 里删掉。
+     */
+    const val CHANNEL_ID = "class_reminder_v2"
+
+    /** 旧渠道（低等级），建好就删，避免设置页里出现两个同名渠道 */
+    private const val OLD_CHANNEL_ID = "class_reminder"
 
     /** 通知 id 的基数，避免和截屏服务的通知撞号 */
     private const val ID_BASE = 20000
 
     /**
-     * 建立通知渠道（只需一次，重复调用无副作用）。
+     * 建立通知渠道（可重复调用）。
      *
      * 关键设置：
-     *   - importance = DEFAULT：会出现在通知栏（这是手表能同步的前提）
+     *   - importance = HIGH：这是**手表能收到**的关键。
+     *     华为运动健康（以及多数手表伴侣 App）会把低等级/静默通知过滤掉，
+     *     低等级渠道在手机上也可能被折叠，手表端就更容易丢。
+     *     注意：HIGH 只是「优先级高」，本渠道 setSound(null)+enableVibration(false)，
+     *     所以手机依然不响不震、也不会横幅弹窗。
      *   - setSound(null)：不出声
      *   - enableVibration(false)：不震动
-     *   - 没有设置高优先级，所以不会横幅弹窗
      */
     fun ensureChannel(context: Context) {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return
         val manager = context.getSystemService(Context.NOTIFICATION_SERVICE)
                 as NotificationManager
-        if (manager.getNotificationChannel(CHANNEL_ID) != null) return
 
         val channel = NotificationChannel(
             CHANNEL_ID,
             "上课提醒",
-            NotificationManager.IMPORTANCE_DEFAULT
+            NotificationManager.IMPORTANCE_HIGH
         ).apply {
             description = "课表提醒：到点静默提示，供手表同步"
             setSound(null, null)
             enableVibration(false)
             enableLights(false)
+            setShowBadge(true)
         }
         manager.createNotificationChannel(channel)
+
+        // 旧的低等级渠道不再使用，删掉以免用户在两处开关之间困惑
+        try {
+            if (manager.getNotificationChannel(OLD_CHANNEL_ID) != null) {
+                manager.deleteNotificationChannel(OLD_CHANNEL_ID)
+            }
+        } catch (_: Throwable) {
+        }
+    }
+
+    /** 当前渠道的重要性等级；-1 表示系统低于 Android 8（无渠道概念） */
+    fun channelImportance(context: Context): Int {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return -1
+        val manager = context.getSystemService(Context.NOTIFICATION_SERVICE)
+                as NotificationManager
+        val ch = manager.getNotificationChannel(CHANNEL_ID) ?: return -1
+        return ch.importance
+    }
+
+    /** 渠道是否被用户/系统关掉了（importance == NONE） */
+    fun channelBlocked(context: Context): Boolean {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return false
+        return channelImportance(context) == NotificationManager.IMPORTANCE_NONE
     }
 
     /**
@@ -100,8 +137,12 @@ object ReminderNotifier {
                 .setContentText(text)
                 // 长文本展开后完整显示（短信有 70 字限制，通知没有）
                 .setStyle(NotificationCompat.BigTextStyle().bigText(text))
-                .setPriority(NotificationCompat.PRIORITY_DEFAULT)
+                // HIGH 提升「被手表伴侣 App 转发」的概率；
+                // 渠道里已关掉声音和震动，所以手机仍然安静
+                .setPriority(NotificationCompat.PRIORITY_HIGH)
                 .setCategory(NotificationCompat.CATEGORY_REMINDER)
+                // 锁屏也显示完整内容，手表拿到的正文才不会被遮挡
+                .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
                 .setAutoCancel(true)
                 .setContentIntent(pi)
                 .setSound(null)

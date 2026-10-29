@@ -165,6 +165,36 @@ class _SettingsPageState extends State<SettingsPage> {
           ],
         ),
 
+        // 手表收不到提醒的排查（本应用的核心用法就是靠手表叫醒，
+        // 但通知能不能到手表，取决于「手表伴侣 App」有没有替我们转发）
+        _card(
+          title: '手表收不到提醒？',
+          children: <Widget>[
+            const Text(
+              '链路是三段：本应用弹通知 → 手表伴侣 App（华为运动健康等）转发 → 手表震动。'
+              '任何一段断了，手表都不会动。下面按顺序查：',
+              style: TextStyle(
+                  fontSize: 12.5, height: 1.7, color: Color(0xFF666666)),
+            ),
+            const SizedBox(height: 10),
+            _watchStep('1', '先确认手机自己有通知',
+                '点下面的「测试通知」。手机通知栏**没有**出现 → 问题在本应用（看闹钟页的诊断）；'
+                    '出现了 → 继续第 2 步。'),
+            _watchStep('2', '在手表伴侣 App 里打开本应用',
+                '华为运动健康 → 设备 → 消息通知 / 应用通知 → 在列表里找到「课表提醒」并打开。\n'
+                    '如果列表里**根本没有这个应用**，说明侧载安装的应用不在转发白名单里 —— '
+                    '直接跳到第 4 步用短信兜底。'),
+            _watchStep('3', '放行手表伴侣 App 的后台',
+                '跨品牌配对时这一步最常被忽略：vivo/小米会冻结华为运动健康，'
+                    '冻结后它就不再转发任何通知。\n'
+                    '请给它开「自启动」「后台运行」「电池不限制」。'),
+            _watchStep('4', '兜底：用双卡短信',
+                '短信一定会被手表同步。把「提醒方式」设为「仅短信」，'
+                    '再用下面的 SIM 卡选择器换一张卡发送，'
+                    '接收号码填另一张卡的号码 —— 手机会收到一条真实的来信通知，手表必然同步。'),
+          ],
+        ),
+
         // 短信
         _card(
           title: '短信提醒',
@@ -713,6 +743,47 @@ class _SettingsPageState extends State<SettingsPage> {
       subtitle: Text(subtitle,
           style: const TextStyle(fontSize: 11.5, height: 1.5)),
       selected: selected,
+    );
+  }
+
+  /// 「手表收不到提醒」排查清单里的一步
+  Widget _watchStep(String index, String title, String detail) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 10),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: <Widget>[
+          Container(
+            width: 20,
+            height: 20,
+            alignment: Alignment.center,
+            decoration: BoxDecoration(
+              color: const Color(0xFFE8EEFB),
+              borderRadius: BorderRadius.circular(10),
+            ),
+            child: Text(index,
+                style: const TextStyle(
+                    fontSize: 11.5,
+                    fontWeight: FontWeight.w600,
+                    color: Color(0xFF3A6BD6))),
+          ),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: <Widget>[
+                Text(title,
+                    style: const TextStyle(
+                        fontSize: 13, fontWeight: FontWeight.w600)),
+                const SizedBox(height: 2),
+                Text(detail,
+                    style: const TextStyle(
+                        fontSize: 12, height: 1.65, color: Color(0xFF666666))),
+              ],
+            ),
+          ),
+        ],
+      ),
     );
   }
 
